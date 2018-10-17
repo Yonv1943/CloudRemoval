@@ -229,7 +229,7 @@ def discriminator(ten, dim, name, reuse=True):
         return ten
 
 
-def get_feed_queue(feed_queue):  # model_train
+def process_train(feed_queue):  # model_train
     gene_name = 'gene'
     disc_name = 'disc'
 
@@ -349,7 +349,7 @@ def get_feed_queue(feed_queue):  # model_train
     T.draw_plot(C.model_log)
 
 
-def put_feed_queue(feed_queue):
+def process_data(feed_queue):
     aerial_data_set, cloud_data_set = get_data_sets(C.train_size)
     print("||Data_sets: ready for check")
 
@@ -387,7 +387,7 @@ def put_feed_queue(feed_queue):
                 # cv2.waitKey(234)
 
     except KeyboardInterrupt:
-        print("| quit:", put_feed_queue.__name__)
+        print("| quit:", process_data.__name__)
 
 
 def run():  # beta
@@ -401,8 +401,8 @@ def run():  # beta
     import multiprocessing as mp
     feed_queue = mp.Queue(maxsize=4)
 
-    process = [mp.Process(target=put_feed_queue, args=(feed_queue,)),
-               mp.Process(target=get_feed_queue, args=(feed_queue,)), ]
+    process = [mp.Process(target=process_data, args=(feed_queue,)),
+               mp.Process(target=process_train, args=(feed_queue,)), ]
 
     [p.start() for p in process]
     [p.join() for p in process]
