@@ -37,9 +37,11 @@
 ## -
 ## 模型解释
 
-![defog_result]()
+![defog_result_0](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/buff_local_eval-00002056.jpg)
+![defog_result_1](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/buff_local_eval-00004977.jpg)
+![defog_result_2](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/buff_local_eval-00007041.jpg)
 如上图：
-![经过小修改的 U-net]()
+![经过小修改的 U-net](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/mod_defog.jpg)
 如上图：图中自动编码器的转置卷积的输出，一定要有序地经过 batch_norm 和 leakly ReLU
 
 ### 为何使用U-net？
@@ -52,12 +54,12 @@ l2范数我也试过了，没什么差别。
 计算云层的loss，我当然是比较 输出的云层，与正确的云层(ground-truth)，然而，计算地面的loss时，我并不是直接比较 输出的地面图片与 正确的地面图片，而是将它们都叠加上正确的云层后，再进行比较。
 这就是我提到的**loss处的小修改**，这个修改是基于下面的推断：
 当地面被不透明度高于75%的云层遮盖，那么我们难以从残存的像素信息中，恢复出它原来的颜色。
-![a simulation of aerial image which covered by clouds of different thicknesses]()
+![a simulation of aerial image which covered by clouds of different thicknesses](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/austin27.jpg)
 所以我将地面图片叠加上云层后，云层厚度大的区域，即便恢复的情况很差（本来就会很差），也不会反映到loss上去，模型可以更加专注于云层的提取，和地面的去雾工作，云层重度遮盖的区域，就留给GAN去做吧。
 
 而这一部分，我使用DCGAN 完成地面情况的修补
 ### 为何使用DCGAN？
-![DCGAN_model]()
+![DCGAN_model](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/mod_GAN.jpg)
 如上图：图中自动编码器的转置卷积的输出，一定要有序地经过 batch_norm 和 leakly ReLU
 我在小规模的数据集上，实现并尝试了原版GAN 以及他的变种们： DCGAN、WGAN、WGAN-GP、LS_GAN 以及 Tensor-GAN，这些变种可以在更稳定的训练下，取得比GAN更好的效果，然而，这些变种之间却没有显著的差别。
 
@@ -94,20 +96,21 @@ WGAN也是一个很好的模型，拜读原文后，有一个地方是值得我�
 
 #### 1.平衡 生成器与判别器 的训练
 训练的时候，过度训练的判别器D(x)，几乎区分出所有real与fake，loss_D 下降地很低，此时生成器G(x) 生成的图片效果差，loss_G 无法为优化提供方向。所以要适当地调节判别器D 与 生成器G 的训练量：每次训练完，统计DCGAN 的两个loss，如果loss_G/loss_D 的比例大于某个值，则停止对判别器的训练，直到比值回到正常范围，反之亦然。（一般是判别器训练过度）
-![unblance training logs]()
+![unblance training logs](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/unblance_1.jpg)
 如图，下面接近0的曲线为loss_D，可以看到，在30步时，训练奔溃，loss无法提供优化方向。与此同时，loss 开始剧烈抖动
 
 #### 2.全局与局部同时判别
 这个方法来自于文章[Globally and Locally Consistent Image Completion - SIGGRAPH 2017][3]，我尝试了，好用.
 若修补区域不是矩形（比如我的云层），也没关系。我的修改方案是：将修补区外的部分变为0后，也放入判别器进行检测。
-![model of Globally and Locally Consistent Image Completion - SIGGRAPH 2017]()
+![model of Globally and Locally Consistent Image Completion - SIGGRAPH 2017](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/mod_Globally%20and%20Locally%20Consistent%20Image%20Completion.jpg)
+![spot mask](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/spot_eval-00000056.jpg)
 
 #### 3.额外保存历史图片
 训练数据集扩大后，发现判别器会在长时间训练后失效，导致模型震荡(model oscillation) 。
 我在cycleGAN 的文章中看到，他用了Shrivastava 的Learning from simulated and unsupervised images through adversarial training 中提及的方法，保存生成器的历史图片，然后与其他图片一同传入判别器进行训练。
 可以保证判别器在学习判别新图片的时候，不会忘记历史图片的判别。避免模型震荡。
 
-![gif about the model oscillation, without buffers]()
+![gif about the model oscillation, without buffers](https://github.com/Yonv1943/CloudRemoval/blob/master/Readme_image/buffer_not.gif)
 上图是一张5帧的gif，可以看到第二训练出好效果后，第三帧又变差。后面震荡还在持续。这就是没有使用本页方法的后果。
 
 ## -
