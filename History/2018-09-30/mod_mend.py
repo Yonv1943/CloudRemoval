@@ -5,9 +5,9 @@ import shutil
 import cv2
 import numpy as np
 import numpy.random as rd
-import tensorflow as tf
-import tensorflow.layers as tl
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # ignore the TensorFlow log messages
+import tensorflow as tf
 import configure
 from util.img_util import get_data_sets
 
@@ -52,7 +52,6 @@ class Tools(object):
             y_max = y_pts.max() + 2 ** -32
             y_pts /= y_max
             e_pts /= y_max
-            print("| ymax:", y_max)
 
             lines.append(plt.plot(x_pts, y_pts, linestyle='dashed', marker='x', markersize=3,
                                   label='loss %d, max: %3.0f' % (idx, y_max))[0])
@@ -60,98 +59,50 @@ class Tools(object):
         plt.legend(lines, loc='upper right')
         plt.show()
 
-    def mat2img(self, mats):
-        mats = np.clip(mats, 0.0, 1.0)
-        out = []
-        for mat in mats:
-            aerialI = mat[:, :, 0:3]
-            cloud1I = mat[:, :, 3, np.newaxis].repeat(3, axis=2)
-            cloud1T = mat[:, :, 4, np.newaxis].repeat(3, axis=2)
-            groundI = mat[:, :, 5:8]
-            groundT = mat[:, :, 8:11]
 
-            img_show = (cloud1I, cloud1T, groundI, groundT, aerialI)
-            img_show = np.concatenate(img_show, axis=0)
-            img_show = (img_show * 255.0).astype(np.uint8)
-            out.append(img_show)
-        res = np.concatenate(out, axis=1)
-        return res
-
-
-C = configure.Config('mod_mend')
+C = configure.Config()
 T = Tools()
 
 
-def model_save_npy(sess, print_info):
-    tf_vars = tf.global_variables()
+def mat2img(mats):
+    mats = np.clip(mats, 0.0, 1.0)
+    out = []
+    for mat in mats:
+        aerial = mat[:, :, 0:3]
+        cloud1I = mat[:, :, 3, np.newaxis].repeat(3, axis=2)
+        cloud1T = mat[:, :, 4, np.newaxis].repeat(3, axis=2)
+        groundI = mat[:, :, 5:8]
+        groundT = mat[:, :, 8:11]
+        groundO = mat[:, :, 11:14]
 
-    '''save as singal npy'''
-    npy_dict = dict()
-    for var in tf_vars:
-        npy_dict[var.name] = var.eval(session=sess)
-        print("| FETCH: %s" % var.name) if print_info else None
-    np.savez(C.model_npz, npy_dict)
-    with open(C.model_npz + '.txt', 'w') as f:
-        f.writelines(["%s\n" % key for key in npy_dict.keys()])
-
-    '''save as several npy'''
-    # shutil.rmtree(C.model_npy, ignore_errors=True)
-    # os.makedirs(C.model_npy, exist_ok=True)
-    # for v in tf_vars:
-    #     v_name = str(v.name).replace('/', '-').replace(':', '.') + '.npy'
-    #     np.save(os.path.join(C.model_npy, v_name), v.eval(session=sess))
-    #     print("| SAVE %s.npy" % v.name) if print_info else None
-    print("| SAVE: %s" % C.model_npz)
+        img_show = (aerial, cloud1I, cloud1T, groundI, groundT, groundO)
+        img_show = np.concatenate(img_show, axis=0)
+        img_show = (img_show * 255.0).astype(np.uint8)
+        out.append(img_show)
+    res = np.concatenate(out, axis=1)
+    return res
 
 
-def model_load_npy(sess):
-    tf_dict = dict()
-    for tf_var in tf.global_variables():
-        tf_dict[tf_var.name] = tf_var
+def sess_saver_logger():
+    # config = tf.ConfigProto()
+    config = tf.ConfigProto(gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=C.gpu_limit))
+    config.gpu_options.allow_growth = True
+    sess = tf.Session(config=config)
 
-    for npy_name in os.listdir(C.model_npz):
-        var_name = npy_name[:-4].replace('-', '/').replace('.', ':')
-        var_node = tf_dict.get(var_name, None)
-        if npy_name.find('defog') == 0 and var_node:
-            var_ary = np.load(os.path.join(C.model_npz, npy_name))
-            sess.run(tf.assign(var_node, var_ary)) if var_node else None
-
-    if os.path.exists(C.model_npz):
+    saver = tf.train.Saver(max_to_keep=4)
+    if os.path.exists(os.path.join(C.model_dir, 'checkpoint')):
+        C.model_path = tf.train.latest_checkpoint(C.model_dir)
+        saver.restore(sess, C.model_path)
+        print("| Load from checkpoint:", C.model_path)
+    elif os.path.exists(C.model_npz):
         # sess.run(tf.global_variables_initializer())
         # sess.run([i.assign(np.load(G.model_npz)[i.name]) for i in tf.trainable_variables()])
         sess.run([i.assign(np.load(C.model_npz)[i.name]) for i in tf.global_variables()])
         print("| Load from npz:", C.model_path)
-
-
-def sess_saver_logger():
-    config = tf.ConfigProto(gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=C.gpu_limit))
-    config.gpu_options.allow_growth = True
-
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # ignore the TensorFlow log messages
-    sess = tf.Session(config=config)
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # recover the TensorFlow log messages
-
-    saver = tf.train.Saver(max_to_keep=4)
-    # if os.path.exists(os.path.join(C.model_dir, 'checkpoint')):
-    try:
-        # C.model_path = tf.train.latest_checkpoint(C.model_dir)
-        saver.restore(sess, C.model_path)
-        print("| Load from checkpoint:", C.model_path)
-    except Exception:
+    else:
         os.makedirs(C.model_dir, exist_ok=True)
         sess.run(tf.global_variables_initializer())
         print("| Init:", C.model_path)
-
-        if os.path.exists(C.model_npz):
-            print("| Load from mod.npz")
-            name2ary = np.load(C.model_npz)
-            for var_node in tf.global_variables():
-                try:
-                    if str(var_node.name).find('defop') == 0:
-                        var_ary = name2ary[var_node.name]
-                        sess.run(tf.assign(var_node, var_ary))
-                except:
-                    pass
 
     logger = open(C.model_log, 'a')
     previous_train_epoch = sum(1 for _ in open(C.model_log)) if os.path.exists(C.model_log) else 0
@@ -160,40 +111,46 @@ def sess_saver_logger():
     return sess, saver, logger, previous_train_epoch
 
 
-def leRU_batch_norm(ten):
-    ten = tf.layers.batch_normalization(ten, training=True)
-    ten = tf.nn.leaky_relu(ten)
+def conv2d(ten, filters):
+    ten = tf.layers.conv2d(ten, filters, kernel_size=4, strides=2,
+                           padding='same', activation=tf.nn.leaky_relu)
     return ten
 
 
-def defog(inp0, dim, name, reuse):
+def conv2d_tp(ten, filters):
+    ten = tf.layers.conv2d_transpose(ten, filters, kernel_size=4, strides=2,
+                                     padding='same', activation=tf.nn.leaky_relu)
+    return ten
+
+
+def defog(inp0, filters, out_dim, name_scope, reuse):
     # inp0 = tf.placeholder(tf.float32, [None, G.size, G.size, 4])  # G.size == 2 ** 8
-    with tf.variable_scope(name, reuse=reuse):
-        ten1 = tl.conv2d(inp0, 1 * dim, 4, 2, 'same', activation=tf.nn.leaky_relu)
-        ten2 = tl.conv2d(ten1, 2 * dim, 4, 2, 'same', activation=tf.nn.leaky_relu)
-        ten3 = tl.conv2d(ten2, 4 * dim, 4, 2, 'same', activation=tf.nn.leaky_relu)
-        ten4 = tl.conv2d(ten3, 8 * dim, 4, 2, 'same', activation=tf.nn.leaky_relu)
-        ten5 = tl.conv2d(ten4, 16 * dim, 4, 2, 'same', activation=tf.nn.leaky_relu)
+    with tf.variable_scope(name_scope, reuse=reuse):
+        # inp0 = tf.contrib.layers.batch_norm(inp0)
+        ten1 = conv2d(inp0, filters * 1)
+        ten2 = conv2d(ten1, filters * 2)
+        ten3 = conv2d(ten2, filters * 4)
+        ten4 = conv2d(ten3, filters * 8)
+        ten5 = conv2d(ten4, filters * 16)
 
-        ten6 = tf.pad(ten5, paddings=tf.constant([(0, 0), (2, 2), (2, 2), (0, 0)]), mode='REFLECT')
-        ten6 = tl.conv2d(ten6, 16 * dim, 3, 1, 'valid', activation=leRU_batch_norm)
-        ten6 = tl.conv2d(ten6, 16 * dim, 3, 1, 'valid', activation=leRU_batch_norm)
+        ten5 = tf.contrib.layers.batch_norm(ten5)
 
-        ten5 = tl.conv2d_transpose(tf.concat((ten6, ten5), axis=3), 32 * dim, 4, 2, 'same', activation=leRU_batch_norm)
-        ten4 = tl.conv2d_transpose(tf.concat((ten5, ten4), axis=3), 16 * dim, 4, 2, 'same', activation=leRU_batch_norm)
-        ten3 = tl.conv2d_transpose(tf.concat((ten4, ten3), axis=3), 8 * dim, 4, 2, 'same', activation=leRU_batch_norm)
-        ten2 = tl.conv2d_transpose(tf.concat((ten3, ten2), axis=3), 4 * dim, 4, 2, 'same', activation=leRU_batch_norm)
-        ten1 = tl.conv2d_transpose(tf.concat((ten2, ten1), axis=3), 2 * dim, 4, 2, 'same', activation=leRU_batch_norm)
+        ten5 = conv2d_tp(ten5, filters * 8)
+        ten4 = conv2d_tp(tf.concat((ten5, ten4), axis=3), filters * 16)
+        ten3 = conv2d_tp(tf.concat((ten4, ten3), axis=3), filters * 8)
+        ten2 = conv2d_tp(tf.concat((ten3, ten2), axis=3), filters * 4)
+        ten1 = conv2d_tp(tf.concat((ten2, ten1), axis=3), filters * 2)
 
-        ten1 = tl.conv2d(tf.concat((ten1, inp0), axis=3), 1 * dim, 3, 1, 'same', activation=tf.nn.leaky_relu)
-        ten1 = tl.conv2d(ten1, 4, 3, 1, 'same', activation=tf.nn.tanh)
-        ten1 = ten1 * 0.505 + 0.5
-        return ten1
+        out = tf.concat((inp0, ten1), axis=3)
+        out = tf.layers.conv2d(out, filters, 3, 1, padding='same', activation=tf.nn.leaky_relu)
+        out = tf.layers.conv2d(out, out_dim, 1, 1, padding='same', activation=tf.nn.tanh)
+        out = out * 0.505 + 0.5
+    return out
 
 
 def get_feed_queue(feed_queue):  # model_train
-    defog_name = 'defog'
-
+    """model init"""
+    '''defog'''
     inp_ground = tf.placeholder(tf.float32, [None, C.size, C.size, 3])
     inp_cloud1 = tf.placeholder(tf.float32, [None, C.size, C.size, 1])
     ten_repeat = tf.ones([1, 1, 1, 3])
@@ -201,22 +158,33 @@ def get_feed_queue(feed_queue):  # model_train
     inp_cloud3 = inp_cloud1 * ten_repeat
     inp_aerial = inp_ground * (1.0 - inp_cloud3) + inp_cloud3
 
-    ten_defog4 = defog(inp_aerial, dim=8, name=defog_name, reuse=False)
-    ten_cloud1 = ten_defog4[:, :, :, 0, tf.newaxis]
+    ten_cldgrd = defog(inp_aerial, filters=12, out_dim=4, name_scope='defog_cloud', reuse=False)
+    ten_cloud1 = ten_cldgrd[:, :, :, 0, tf.newaxis]
     ten_cloud3 = ten_cloud1 * ten_repeat
-    ten_ground = ten_defog4[:, :, :, 1:4]
+    ten_ground = ten_cldgrd[:, :, :, 1:4]
     ten_aerial = ten_ground * (1.0 - ten_cloud3) + ten_cloud3
 
     loss_cloud1 = tf.losses.absolute_difference(inp_cloud1, ten_cloud1)
     loss_aerial = tf.losses.absolute_difference(inp_aerial, ten_aerial)
-    loss_defog = loss_cloud1* 3.0 + loss_aerial
+    loss_defog = loss_cloud1 * 3.0 + loss_aerial
 
+    '''mend'''
+    out_ground = defog(ten_cldgrd, filters=14, out_dim=3, name_scope='mend_ground', reuse=False)
+    out_ground = ten_ground * (1.0 - ten_cloud3) + out_ground * ten_cloud3
+    loss_mend = tf.losses.absolute_difference(inp_ground, out_ground)
+
+    '''optimizer'''
     tf_vars = tf.trainable_variables()
-    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-        optz_defog4 = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5, beta2=0.9) \
-            .minimize(loss_defog, var_list=[v for v in tf_vars if v.name.startswith(defog_name)])
-    loss = [loss_cloud1, loss_aerial]
-    optz = [optz_defog4, ]
+    var__defog = [v for v in tf_vars if v.name.startswith('defog_cloud')]
+    var__gene = [v for v in tf_vars if v.name.startswith('mend_ground')]
+
+    optz_conv = tf.train.AdamOptimizer(C.learning_rate) \
+        .minimize(loss_defog, var_list=var__defog)
+    optz_gene = tf.train.AdamOptimizer(C.learning_rate) \
+        .minimize(loss_mend, var_list=var__gene)
+
+    loss = [loss_defog, loss_mend]
+    optz = [optz_conv, optz_gene]
 
     """model train"""
     sess, saver, logger, previous_train_epoch = sess_saver_logger()
@@ -226,6 +194,7 @@ def get_feed_queue(feed_queue):  # model_train
                       inp_cloud1: eval_feed_list[1], }
 
     '''model check'''
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # recover the TensorFlow log messages
     print("||Training Check")
     feed_list = feed_queue.get()
     feed_dict[inp_ground] = feed_list[0]
@@ -240,6 +209,11 @@ def get_feed_queue(feed_queue):  # model_train
             batch_losses = list()
 
             fetches = [loss, optz]
+            dim4_loss = loss_defog.eval(feed_dict, session=sess)
+            pass_mend = bool(dim4_loss > C.max_gene_loss)
+            # pass_mend = False
+            if pass_mend:
+                fetches = [loss[:1], optz[:1]]
 
             for i in range(C.batch_epoch):
                 feed_dict[inp_ground], feed_dict[inp_cloud1] = feed_queue.get()
@@ -247,6 +221,9 @@ def get_feed_queue(feed_queue):  # model_train
 
             loss_average = np.mean(batch_losses, axis=0)
             loss_error = np.std(batch_losses, axis=0)
+            if pass_mend:
+                loss_average = np.append(loss_average, 0.0)
+                loss_error = np.append(loss_error, 0.0)
 
             logger.write('%e %e %e %e\n'
                          % (loss_average[0], loss_error[0],
@@ -256,8 +233,10 @@ def get_feed_queue(feed_queue):  # model_train
                 show_time = time.time()
                 remain_epoch = C.train_epoch - epoch
                 remain_time = (show_time - start_time) * remain_epoch / (epoch + 1)
-                print(end="\n|  %3d s |%3d epoch | Loss: %9.3e %9.3e"
-                          % (remain_time, remain_epoch, loss_average[0], loss_average[1],))
+                print(end="\n|  %3d s |%3d epoch | Loss: %9.3e %9.3e %d"
+                          % (remain_time, remain_epoch,
+                             loss_average[0], loss_average[1],
+                             int(pass_mend),))
             if time.time() - save_time > C.save_gap:
                 '''save model'''
                 save_time = time.time()
@@ -267,28 +246,25 @@ def get_feed_queue(feed_queue):  # model_train
                 print(end="\n||SAVE")
 
                 '''eval while training'''
-                eval_out = sess.run([inp_aerial,
-                                     inp_cloud1, ten_cloud1,
-                                     inp_ground, ten_ground, ], eval_feed_dict)
+                eval_out = sess.run([inp_aerial, inp_cloud1, ten_cloud1,
+                                     inp_ground, ten_ground, out_ground], eval_feed_dict)
 
                 img_show = np.concatenate(eval_out, axis=3)
-                img_show = T.mat2img(img_show)
+                img_show = mat2img(img_show)
                 cv2.imwrite(os.path.join(C.model_dir, "eval-%08d.jpg" % (previous_train_epoch + epoch)), img_show)
     except KeyboardInterrupt:
         print("| KeyboardInterrupt")
-        model_save_npy(sess, print_info=True)
     finally:
         '''save model'''
         saver.save(sess, C.model_path, write_meta_graph=False)
         print("\n| Save:", C.model_path)
 
         '''eval while training'''
-        eval_out = sess.run([inp_aerial,
-                             inp_cloud1, ten_cloud1,
-                             inp_ground, ten_ground, ], eval_feed_dict)
+        eval_out = sess.run([inp_aerial, inp_cloud1, ten_cloud1,
+                             inp_ground, ten_ground, out_ground], eval_feed_dict)
 
         img_show = np.concatenate(eval_out, axis=3)
-        img_show = T.mat2img(img_show)
+        img_show = mat2img(img_show)
         cv2.imwrite(os.path.join(C.model_dir, "eval-%08d.jpg" % (previous_train_epoch + epoch)), img_show)
 
     print('| Batch_epoch: %dx%d' % (C.batch_epoch, C.batch_size))
@@ -305,8 +281,8 @@ def put_feed_queue(feed_queue):
     print("||Data_sets: ready for check")
 
     rd.shuffle(aerial_data_set)
-    feed_queue.put([aerial_data_set[:C.eval_size],
-                    cloud_data_set[:C.eval_size], ])  # for eval
+    feed_queue.put([aerial_data_set[:C.test_size],
+                    cloud_data_set[:C.test_size], ])  # for eval
     feed_queue.put([aerial_data_set[0: 0 + C.batch_size],
                     cloud_data_set[0: 0 + C.batch_size], ])  # for check
     try:
@@ -316,13 +292,6 @@ def put_feed_queue(feed_queue):
                 rd.shuffle(aerial_data_set)
             else:
                 rd.shuffle(cloud_data_set)
-
-            if epoch % 8 == 0:
-                for i, img in aerial_data_set[:C.train_size//8]:
-                    aerial_data_set[i] = np.rot90(img)
-            elif epoch % 8 == 4:
-                for i, img in cloud_data_set[:C.train_size//8]:
-                    cloud_data_set[i] = np.rot90(img)
 
             for i in range(C.batch_epoch):
                 j = i * C.batch_size
@@ -350,7 +319,7 @@ def run():  # beta
 
     # T.draw_plot(C.model_log)
 
-    if input("||PRESS 'y' to REMOVE model_dir? %s : " % C.model_dir) == 'y':
+    if input("||REMOVE model_dir? %s\n||PRESS 'y' to REMOVE: " % C.model_dir) == 'y':
         shutil.rmtree(C.model_dir, ignore_errors=True)
         print("||REMOVE")
     else:

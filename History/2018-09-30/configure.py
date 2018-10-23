@@ -2,17 +2,14 @@ import os
 
 
 class Config(object):
-    train_epoch = 2 ** 12
-    train_size = 2 ** 18
-    eval_size = 2 ** 3
-    batch_size = 2 ** 6
+    train_epoch = 2 ** 9
+    train_size = 2 ** 15  # 15
+    batch_size = min(2 ** 5, train_size)  # 2**13
     batch_epoch = train_size // batch_size
 
-    size = 2 ** 7
-    active_rate = 2 ** 3
-    replace_num = int(0.25 * batch_size)
-
-    show_gap = 2 ** 4  # time
+    test_size = 2 ** 2
+    size = 2 ** 8  # 2 ** 6
+    show_gap = 2 ** 6  # time
     save_gap = 2 ** 10  # time
     gpu_limit = 0.48  # 0.0 ~ 1.0
 
@@ -30,7 +27,7 @@ class Config(object):
 
 
 if __name__ == '__main__':
-    from mod_GAN_polygon import run
-    # from mod_GAN_spot import run
+    from mod_WGAN import run
+    # from mod_mend import run
 
     run()

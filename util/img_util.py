@@ -6,11 +6,74 @@ import numpy as np
 import numpy.random as rd
 from configure import Config
 
-G = Config()
+C = Config()
 """
 2018-09-18 23:23:23 fix bug: img_grid() 
-2018-09-19 15:12:12 upgrade: img_grid(), random cut
+2018-09-19 upgrade: img_grid(), random cut
+2018-10-21 'class Tools' move from mod_*.py to util.img_util.py 
 """
+
+
+class Tools(object):
+    def img_check(self, img):
+        print("| min,max %6.2f %6.2f |%s", img.shape, np.min(img), np.max(img))
+
+    def ary_check(self, ary):
+        print("| min,max %6.2f %6.2f |ave,std %6.2f %6.2f |%s" %
+              (np.min(ary), np.max(ary), np.average(ary), float(np.std(ary)), ary.shape,))
+
+    def draw_plot(self, log_txt_path):
+        print("||" + self.draw_plot.__name__)
+        if not os.path.exists(log_txt_path):  # check
+            print("|NotExist:", log_txt_path)
+            return None
+
+        arys = np.loadtxt(log_txt_path)
+        if arys.shape[0] < 2:
+            print("|Empty:", log_txt_path)
+            return None
+
+        if 'plt' not in globals():
+            import matplotlib.pyplot as plt_global
+            global plt
+            plt = plt_global
+
+        arys_len = int(len(arys) * 0.9)
+        arys = arys[-arys_len:]
+        arys = arys.reshape((arys_len, -1, 2)).transpose((1, 0, 2))
+
+        lines = []
+        x_pts = np.arange(arys.shape[1])
+        for idx, ary in enumerate(arys):
+            y_pts = ary[:, 0]
+            e_pts = ary[:, 1]
+
+            y_max = y_pts.max() + 2 ** -32
+            y_pts /= y_max
+            e_pts /= y_max
+            print("| ymax:", y_max)
+
+            lines.append(plt.plot(x_pts, y_pts, linestyle='dashed', marker='x', markersize=3,
+                                  label='loss %d, max: %3.0f' % (idx, y_max))[0])
+            plt.errorbar(x_pts, y_pts, e_pts, linestyle='None')
+        plt.legend(lines, loc='upper right')
+        plt.show()
+
+    def eval_and_get_img(self, mat_list, img_path, channel):
+        mats = np.concatenate(mat_list, axis=3)
+        mats = np.clip(mats, 0.0, 1.0)
+
+        out = []
+        for mat in mats:
+            mat = mat.reshape((C.size, C.size, -1, channel))
+            mat = mat.transpose((2, 0, 1, 3))
+            mat = np.concatenate(mat, axis=0)
+            mat = (mat * 255.0).astype(np.uint8)
+            out.append(mat)
+
+        img = np.concatenate(out, axis=1)
+        # img = np.rot90(img)
+        cv2.imwrite(img_path, img)
 
 
 class Cloud2Grey(object):
@@ -50,17 +113,17 @@ def cover_cloud_mask(img, cloud):
 
 def img_grid(img, channel=3):
     xlen, ylen = img.shape[0:2]
-    xmod = xlen % G.size
-    ymod = ylen % G.size
+    xmod = xlen % C.size
+    ymod = ylen % C.size
 
     xrnd = int(rd.rand() * xmod)
     yrnd = int(rd.rand() * ymod)
 
     img = img[xrnd:xrnd - xmod, yrnd:yrnd - ymod]  # cut img
 
-    imgs = img.reshape((-1, G.size, ylen // G.size, G.size, channel))
+    imgs = img.reshape((-1, C.size, ylen // C.size, C.size, channel))
     imgs = imgs.transpose((0, 2, 1, 3, 4))
-    imgs = imgs.reshape((-1, G.size, G.size, channel))
+    imgs = imgs.reshape((-1, C.size, C.size, channel))
     return imgs
 
 
@@ -75,21 +138,8 @@ def save_cloud_npy(img_path):
     imgs = imgs * (255.0 / ((imgs.max(axis=(1, 2, 3)) + 1.0).reshape((-1, 1, 1, 1))))
 
     npy_name = os.path.basename(img_path)[:-4] + '.npz'
-    npy_path = os.path.join(G.grey_dir, npy_name)
+    npy_path = os.path.join(C.grey_dir, npy_name)
     np.savez_compressed(npy_path, imgs.astype(np.uint8))
-
-
-def get_imgs_for_cloud_data_set(npy_path):
-    imgs = np.load(npy_path)['arr_0']
-    imgs = imgs.astype(np.float32) / 255.0
-    return imgs
-
-
-def get_imgs_for_aerial_data_set(img_path):
-    img = cv2.imread(img_path)
-    imgs = img_grid(img, channel=3)
-    imgs = imgs.astype(np.float32) / 255.0
-    return imgs
 
 
 def mp_pool(func, iterable):
@@ -100,47 +150,123 @@ def mp_pool(func, iterable):
     return res
 
 
-def get_data_sets(data_size):
-    print("| %s" % get_data_sets.__name__)
+def get_data__aerial_imgs(img_path):
+    img = cv2.imread(img_path)
+    imgs = img_grid(img, channel=3)
+    imgs = imgs.astype(np.float32) / 255.0
+    return imgs
 
-    """aerial_data_set"""
-    img_per_img = int((5000 // G.size) * (5000 // G.size))
+
+def get_data__greysc_imgs(img_path):
+    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    imgs = img_grid(img, channel=1)
+
+    imgs = imgs.astype(np.float32) / 255.0
+    return imgs
+
+
+def get_data__aerial(data_size, channel=3):
+    img_per_img = int((5000 // C.size) * (5000 // C.size))
     img_we_need = data_size // img_per_img + 1
 
-    img_paths = glob.glob(os.path.join(G.aerial_dir, '*.tif'))[:img_we_need]
-    data_sets = mp_pool(func=get_imgs_for_aerial_data_set, iterable=img_paths)
-    aerial_data_set = []
-    for data_set in data_sets:
-        aerial_data_set.extend(data_set)
-    aerial_data_set = np.array(aerial_data_set[:data_size])
+    img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))[:img_we_need]
+    pooling_func = get_data__aerial_imgs if channel == 3 else get_data__greysc_imgs
+    data_sets = mp_pool(func=pooling_func, iterable=img_paths)
 
+    data_sets_shape = list(data_sets[0].shape)
+    data_sets_shape[0] = -1
+
+    data_set = np.reshape(data_sets, data_sets_shape)
+    data_set = data_set[:data_size]
+
+    print("| %s | shape: %s" % (get_data__aerial.__name__, data_set.shape))
+    return data_set
+
+
+def get_data__laplac_imgs(img_path):
+    img = cv2.imread(img_path, flags=cv2.IMREAD_GRAYSCALE)  # read as GRAY
+    img = cv2.Laplacian(img, ddepth=cv2.CV_8U, ksize=3)
+    img = cv2.blur(img, ksize=(3, 3))
+
+    imgs = img_grid(img, channel=1)
+    imgs = imgs.astype(np.float32) / 255.0
+    return imgs
+
+
+def get_data__laplac(data_size):
+    img_per_img = int((5000 // C.size) * (5000 // C.size))
+    img_we_need = data_size // img_per_img + 1
+
+    img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))[:img_we_need]
+    data_sets = mp_pool(func=get_data__laplac_imgs, iterable=img_paths)
+
+    data_sets_shape = list(data_sets[0].shape)
+    data_sets_shape[0] = -1
+
+    data_set = np.reshape(data_sets, data_sets_shape)
+    data_set = data_set[:data_size]
+
+    print("| %s | shape: %s" % (get_data__laplac.__name__, data_set.shape))
+    return data_set
+
+
+def get_data__mask01(data_size, channel=1):
+    ten = np.zeros([1, C.size, C.size, 1])
+    ten[0, int(0.25 * C.size):int(0.75 * C.size), int(0.25 * C.size):int(0.75 * C.size), 0] = 1.0
+    ten = ten * np.ones([data_size, 1, 1, 1])
+    return ten
+
+
+def get_data__buffer(data_size, channel):
+    return np.zeros([data_size, C.size, C.size, channel])
+
+
+def get_data__poly01(data_size):
+    mats = []
+    contours = rd.randint(0.125 * C.size, 0.875 * C.size, (data_size, 1, 5, 2))
+    for cnt in contours:
+        img = cv2.fillPoly(np.zeros((C.size, C.size, 1), np.float32), [cnt], 1.0)
+        img = cv2.circle(img, tuple(cnt[0, 0]), C.size // 8, 1.0, cv2.FILLED)
+        img = cv2.blur(img, (8, 8))
+        mats.append(img[np.newaxis, :, :, np.newaxis])
+
+    return np.concatenate(mats, axis=0)
+
+
+def get_data__cloud1_imgs(npy_path):
+    imgs = np.load(npy_path)['arr_0']
+    imgs = imgs.astype(np.float32) / 255.0
+    return imgs
+
+
+def get_data__cloud1(data_size):
     """cloud_npy"""
-    img_per_npy = int((1060 / 2 // G.size) * (1920 / 2 // G.size))
+    img_per_npy = int((1060 / 2 // C.size) * (1920 / 2 // C.size))
     img_we_need = data_size // img_per_npy + 1
 
-    img_paths = glob.glob(os.path.join(G.cloud_dir, '*.jpg'))
+    img_paths = glob.glob(os.path.join(C.cloud_dir, '*.jpg'))
     img_paths = img_paths[:img_we_need]
 
-    os.makedirs(G.grey_dir, exist_ok=True)
-    npy_names = set([p[:-4] for p in os.listdir(G.grey_dir)])
+    os.makedirs(C.grey_dir, exist_ok=True)
+    npy_names = set([p[:-4] for p in os.listdir(C.grey_dir)])
     img_paths = [p for p in img_paths if os.path.basename(p)[:-4] not in npy_names]
     mp_pool(func=save_cloud_npy, iterable=img_paths)
 
     """cloud_data_set"""
-    npy_paths = glob.glob(os.path.join(G.grey_dir, '*.npz'))[:img_we_need]
-    data_sets = mp_pool(func=get_imgs_for_cloud_data_set, iterable=npy_paths)
-    cloud_data_set = []
-    for data_set in data_sets:
-        cloud_data_set.extend(data_set)
-    cloud_data_set = np.array(cloud_data_set[:data_size])
+    npy_paths = glob.glob(os.path.join(C.grey_dir, '*.npz'))[:img_we_need]
+    data_sets = mp_pool(func=get_data__cloud1_imgs, iterable=npy_paths)
 
-    '''data_sets'''
-    data_sets = (aerial_data_set, cloud_data_set)
-    for ary in data_sets:
-        print(end='  len %d |' % len(ary))
-        ary_check(ary[0])
-    return data_sets
+    data_sets_shape = list(data_sets[0].shape)
+    data_sets_shape[0] = -1
+
+    data_set = np.reshape(data_sets, data_sets_shape)
+    data_set = data_set[:data_size]
+
+    print("| %s | shape: %s" % (get_data__cloud1.__name__, data_set.shape))
+    return data_set
 
 
 if __name__ == '__main__':
-    get_data_sets(data_size=4)
+    data_aerial = get_data__aerial(2 ** 7)
+    data_cloud1 = get_data__cloud1(2 ** 7)
+    data_laplac = get_data__laplac(2 ** 7)

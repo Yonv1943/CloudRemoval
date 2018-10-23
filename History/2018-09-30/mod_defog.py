@@ -12,6 +12,10 @@ import configure
 from util.img_util import get_data_sets
 
 
+"""
+2018-10-10 Modify: Yonv1943
+"""
+
 class Tools(object):
     def ten_check(self, ten):
         return tf.Print(ten, [str(ten.shape)], message='|| ')
@@ -60,22 +64,26 @@ class Tools(object):
         plt.legend(lines, loc='upper right')
         plt.show()
 
-    def mat2img(self, mats):
+    def eval_and_get_img(self, mat_list, img_path):
+        mats = np.concatenate(mat_list, axis=3)
         mats = np.clip(mats, 0.0, 1.0)
+
         out = []
         for mat in mats:
-            aerialI = mat[:, :, 0:3]
-            cloud1I = mat[:, :, 3, np.newaxis].repeat(3, axis=2)
-            cloud1T = mat[:, :, 4, np.newaxis].repeat(3, axis=2)
-            groundI = mat[:, :, 5:8]
-            groundT = mat[:, :, 8:11]
+            mat = mat.reshape((C.size, C.size, -1, 3))
+            mat = mat.transpose((2, 0, 1, 3))
+            mat = np.concatenate(mat, axis=0)
+            mat = (mat * 255.0).astype(np.uint8)
+            out.append(mat)
 
-            img_show = (cloud1I, cloud1T, groundI, groundT, aerialI)
-            img_show = np.concatenate(img_show, axis=0)
-            img_show = (img_show * 255.0).astype(np.uint8)
-            out.append(img_show)
-        res = np.concatenate(out, axis=1)
-        return res
+        img = np.concatenate(out, axis=1)
+        img = np.rot90(img)
+        cv2.imwrite(img_path, img)
+
+        out = []
+        for mat in mats:
+            mat = mat.reshape((C.size, C.size, -1, 3))
+            mat = mat.transpose((2, 0, 1, 3))
 
 
 C = configure.Config('mod_mend')
@@ -191,7 +199,7 @@ def defog(inp0, dim, name, reuse):
         return ten1
 
 
-def get_feed_queue(feed_queue):  # model_train
+def process_train(feed_queue):  # model_train
     defog_name = 'defog'
 
     inp_ground = tf.placeholder(tf.float32, [None, C.size, C.size, 3])
@@ -209,7 +217,7 @@ def get_feed_queue(feed_queue):  # model_train
 
     loss_cloud1 = tf.losses.absolute_difference(inp_cloud1, ten_cloud1)
     loss_aerial = tf.losses.absolute_difference(inp_aerial, ten_aerial)
-    loss_defog = loss_cloud1* 3.0 + loss_aerial
+    loss_defog = loss_cloud1 * 3.0 + loss_aerial
 
     tf_vars = tf.trainable_variables()
     with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
@@ -221,6 +229,7 @@ def get_feed_queue(feed_queue):  # model_train
     """model train"""
     sess, saver, logger, previous_train_epoch = sess_saver_logger()
     feed_dict = dict()
+    eval_out_fetch = [inp_cloud3, ten_cloud3, inp_aerial, ten_ground, inp_ground]
     eval_feed_list = feed_queue.get()
     eval_feed_dict = {inp_ground: eval_feed_list[0],
                       inp_cloud1: eval_feed_list[1], }
@@ -272,24 +281,24 @@ def get_feed_queue(feed_queue):  # model_train
                                      inp_ground, ten_ground, ], eval_feed_dict)
 
                 img_show = np.concatenate(eval_out, axis=3)
-                img_show = T.mat2img(img_show)
-                cv2.imwrite(os.path.join(C.model_dir, "eval-%08d.jpg" % (previous_train_epoch + epoch)), img_show)
+                T.eval_and_get_img(mat_list=sess.run(eval_out_fetch, eval_feed_dict),
+                                   img_path=os.path.join(C.model_dir, "eval-%08d.jpg"
+                                                         % (previous_train_epoch + epoch)))
     except KeyboardInterrupt:
         print("| KeyboardInterrupt")
-        model_save_npy(sess, print_info=True)
+        saver.save(sess, C.model_path, write_meta_graph=False)
+        print("| Saved to : %s" % C.model_path)
+        model_save_npy(sess, print_info=False)
+        print("| Saved to : %s" % C.model_npz)
+
     finally:
         '''save model'''
         saver.save(sess, C.model_path, write_meta_graph=False)
-        print("\n| Save:", C.model_path)
+        print("| Saved to : %s" % C.model_path)
 
-        '''eval while training'''
-        eval_out = sess.run([inp_aerial,
-                             inp_cloud1, ten_cloud1,
-                             inp_ground, ten_ground, ], eval_feed_dict)
-
-        img_show = np.concatenate(eval_out, axis=3)
-        img_show = T.mat2img(img_show)
-        cv2.imwrite(os.path.join(C.model_dir, "eval-%08d.jpg" % (previous_train_epoch + epoch)), img_show)
+        T.eval_and_get_img(mat_list=sess.run(eval_out_fetch, eval_feed_dict),
+                           img_path=os.path.join(C.model_dir, "eval-%08d.jpg"
+                                                 % (previous_train_epoch + epoch)))
 
     print('| Batch_epoch: %dx%d' % (C.batch_epoch, C.batch_size))
     print('| Train_epoch: %d' % C.train_epoch)
@@ -300,13 +309,13 @@ def get_feed_queue(feed_queue):  # model_train
     T.draw_plot(C.model_log)
 
 
-def put_feed_queue(feed_queue):
+def process_data(feed_queue):
     aerial_data_set, cloud_data_set = get_data_sets(C.train_size)
     print("||Data_sets: ready for check")
 
     rd.shuffle(aerial_data_set)
-    feed_queue.put([aerial_data_set[:C.eval_size],
-                    cloud_data_set[:C.eval_size], ])  # for eval
+    feed_queue.put([aerial_data_set[:C.test_size],
+                    cloud_data_set[:C.test_size], ])  # for eval
     feed_queue.put([aerial_data_set[0: 0 + C.batch_size],
                     cloud_data_set[0: 0 + C.batch_size], ])  # for check
     try:
@@ -318,10 +327,10 @@ def put_feed_queue(feed_queue):
                 rd.shuffle(cloud_data_set)
 
             if epoch % 8 == 0:
-                for i, img in aerial_data_set[:C.train_size//8]:
+                for i, img in enumerate(aerial_data_set[:C.batch_size]):
                     aerial_data_set[i] = np.rot90(img)
             elif epoch % 8 == 4:
-                for i, img in cloud_data_set[:C.train_size//8]:
+                for i, img in enumerate(cloud_data_set[:C.batch_size]):
                     cloud_data_set[i] = np.rot90(img)
 
             for i in range(C.batch_epoch):
@@ -338,7 +347,7 @@ def put_feed_queue(feed_queue):
                 # cv2.waitKey(234)
 
     except KeyboardInterrupt:
-        print("| quit:", put_feed_queue.__name__)
+        print("| quit:", process_data.__name__)
 
 
 def run():  # beta
@@ -359,8 +368,8 @@ def run():  # beta
     import multiprocessing as mp
     feed_queue = mp.Queue(maxsize=4)
 
-    process = [mp.Process(target=put_feed_queue, args=(feed_queue,)),
-               mp.Process(target=get_feed_queue, args=(feed_queue,)), ]
+    process = [mp.Process(target=process_data, args=(feed_queue,)),
+               mp.Process(target=process_train, args=(feed_queue,)), ]
 
     [p.start() for p in process]
     [p.join() for p in process]

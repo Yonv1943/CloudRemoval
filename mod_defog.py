@@ -314,8 +314,8 @@ def process_data(feed_queue):
     print("||Data_sets: ready for check")
 
     rd.shuffle(aerial_data_set)
-    feed_queue.put([aerial_data_set[:C.test_size],
-                    cloud_data_set[:C.test_size], ])  # for eval
+    feed_queue.put([aerial_data_set[:C.eval_size],
+                    cloud_data_set[:C.eval_size], ])  # for eval
     feed_queue.put([aerial_data_set[0: 0 + C.batch_size],
                     cloud_data_set[0: 0 + C.batch_size], ])  # for check
     try:
