@@ -11,6 +11,8 @@ C = Config()
 2018-09-18 23:23:23 fix bug: img_grid() 
 2018-09-19 upgrade: img_grid(), random cut
 2018-10-21 'class Tools' move from mod_*.py to util.img_util.py 
+2018-10-21 poly, blur debug
+2018-10-24 stagger plot
 """
 
 
@@ -44,7 +46,9 @@ class Tools(object):
 
         lines = []
         x_pts = np.arange(arys.shape[1])
+        x_pts *= arys.shape[0]  # stagger
         for idx, ary in enumerate(arys):
+            x_pts += idx
             y_pts = ary[:, 0]
             e_pts = ary[:, 1]
 
@@ -131,7 +135,7 @@ def save_cloud_npy(img_path):
     img = cv2.imread(img_path)
     img = cloud2grey.run(img)[:1060, :1920]
     img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))  # resize
-    img = cv2.blur(img, (5, 5))
+    img = cv2.blur(img, (3, 3))
 
     imgs = img_grid(img, channel=1).astype(np.float32)
     imgs = (imgs - imgs.min(axis=(1, 2, 3)).reshape((-1, 1, 1, 1)))
@@ -221,15 +225,27 @@ def get_data__buffer(data_size, channel):
     return np.zeros([data_size, C.size, C.size, channel])
 
 
-def get_data__poly01(data_size):
+def get_data__sqrt01(data_size):
     mats = []
-    contours = rd.randint(0.125 * C.size, 0.875 * C.size, (data_size, 1, 5, 2))
+    contours = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, 4))
     for cnt in contours:
         img = cv2.fillPoly(np.zeros((C.size, C.size, 1), np.float32), [cnt], 1.0)
-        img = cv2.circle(img, tuple(cnt[0, 0]), C.size // 8, 1.0, cv2.FILLED)
-        img = cv2.blur(img, (8, 8))
-        mats.append(img[np.newaxis, :, :, np.newaxis])
+        img = cv2.circle(img, tuple(cnt[0, 0]), C.size // 4, 1.0, cv2.FILLED)
+        img = cv2.blur(img, (3, 3))
 
+        mats.append(img[np.newaxis, :, :, np.newaxis])
+    return np.concatenate(mats, axis=0)
+
+
+def get_data__circle(data_size):
+    mats = []
+    circle_xys = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, 2))
+    for cx, cy in circle_xys:
+        img = np.zeros((C.size, C.size))
+        img = cv2.circle(img, (cx, cy), C.size // 4, 1.0, cv2.FILLED)
+        # img = cv2.blur(img, (3, 3))[:, :, np.newaxis]  # 1943
+
+        mats.append(img[np.newaxis, :, :, np.newaxis])
     return np.concatenate(mats, axis=0)
 
 
@@ -264,6 +280,34 @@ def get_data__cloud1(data_size):
 
     print("| %s | shape: %s" % (get_data__cloud1.__name__, data_set.shape))
     return data_set
+
+
+def get_cloud1_continusly(beg_idx, end_idx, step):
+    cloud2grey = Cloud2Grey()  # cloud2grey and save as npz
+    img_paths = glob.glob(os.path.join(C.cloud_dir, '*.jpg'))
+    img_paths = sorted(img_paths)[beg_idx:end_idx:step]
+    imgs = list()
+    for img_path in img_paths:
+        cloud1 = cv2.imread(img_path)
+        cloud1 = cloud2grey.run(cloud1)[:1060, :1920]
+        cloud1 = cv2.blur(cloud1, (3, 3))
+        cloud1 = np.clip(cloud1, 0, 127) * 2
+
+        imgs.append(cloud1)
+        # cv2.imshow('beta', cloud1)
+        # cv2.waitKey(234)
+
+    return imgs  # shape(w, h), dtype(np.uint8)(0, 255)
+
+
+def get_aerial_continusly(ground, cloud1s):
+    imgs = list()
+    for cloud1 in cloud1s:
+        img = cover_cloud_mask(ground, cloud1)
+        img = img.astype(np.float32) / 255.0
+        imgs.append(img)
+
+    return imgs  # shape(w, h, 3), dtype(float32)(0.0, 1.0)
 
 
 if __name__ == '__main__':

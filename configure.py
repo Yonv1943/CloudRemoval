@@ -2,8 +2,8 @@ import os
 
 
 class Config(object):
-    train_epoch = 2 ** 12
-    train_size = 2 ** 18
+    train_epoch = 2 ** 11
+    train_size = int(2 ** 18)
     eval_size = 2 ** 3
     batch_size = 2 ** 6
     batch_epoch = train_size // batch_size
@@ -13,11 +13,11 @@ class Config(object):
     replace_num = int(0.25 * batch_size)
 
     show_gap = 2 ** 4  # time
-    save_gap = 2 ** 10  # time
+    save_gap = 2 ** 9  # time
     gpu_limit = 0.48  # 0.0 ~ 1.0
 
     data_dir = '/mnt/sdb1/data_sets'
-    aerial_dir = os.path.join(data_dir, 'AerialImageDataset')
+    aerial_dir = os.path.join(data_dir, 'AerialImageDataset/test')
     cloud_dir = os.path.join(data_dir, 'ftp.nnvl.noaa.gov_color_IR_2018')
     grey_dir = os.path.join(data_dir, 'CloudGreyDataset')
 
@@ -30,7 +30,11 @@ class Config(object):
 
 
 if __name__ == '__main__':
-    from mod_GAN_polygon import run
-    # from mod_GAN_spot import run
+    # from mod_GAN_poly import run
+    # from mod_GAN_circle import run
+    # from mod_GAN_circle import run
+    from mod_replace import run
 
     run()
+    # from mod_defog import evaluation
+    # evaluation()
