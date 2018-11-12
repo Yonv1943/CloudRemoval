@@ -31,10 +31,9 @@ Reference: https://github.com/znxlwm/tensorflow-MNIST-GAN-DCGAN
 2018-11-05 for generator
 2018-11-06 for process_data, tiny, U-net for generator
 2018-11-06 buffer mask01 for discriminator, inp_dim_4
-2018-11-06 inp, buf, mask
 '''
 
-C = Config('mod_mend_mask')
+C = Config('mod_mend_Unet')
 T = img_util.Tools()
 rd.seed(1943)
 
@@ -378,48 +377,44 @@ def process_data(feed_queue, buff_queue):
     bs = C.batch_size
 
     data_aerial = img_util.get_data__aerial(ts, channel=3)
-    data_buffer = img_util.get_data__buffer(ts, channel=3)
-    data_mask01 = img_util.get_data__circle(ts, circle_num=3)
+    data_circle = img_util.get_data__circle(ts, circle_num=3)
+    data_aerial = np.concatenate((data_aerial, data_circle), axis=3)  # [ts, C.size, C.size, 4]
+    del data_circle
+
+    data_buffer = img_util.get_data__buffer(ts, channel=4)  # buf_aerial3 + mask1
 
     print("||Data_sets: ready for check")
     eval_id = rd.randint(ts // 2, ts, C.eval_size * 2)
     eval_id = list(set(eval_id))[:C.eval_size]
-    feed_queue.put([data_aerial[eval_id],
-                    data_mask01[eval_id]])  # for eval
+    feed_queue.put([data_aerial[eval_id], ])  # for eval
     feed_queue.put([data_aerial[:bs],
-                    data_buffer[:bs],
-                    data_mask01[:bs], ])  # for check
+                    data_buffer[:bs], ])  # for check
 
     print("||Data_sets: ready for training")
     for epoch in range(C.train_epoch):
-        # if epoch % 8 == 1:  # refresh circle(mask)
-        #     k = rd.randint(ts - bs)
-        #     data_aerial[k:k + bs, :, :, 3:4] = img_util.get_data__circle(bs, circle_num=3)
-        # elif epoch % 8 == 5:  # np.rot90()
-        #     k = rd.randint(ts - bs)
-        #     data_aerial[k:k + bs] = data_aerial[k:k + bs].transpose((0, 2, 1, 3))
-        #     data_buffer[k:k + bs] = data_buffer[k:k + bs].transpose((0, 2, 1, 3))
-        #     data_mask01[k:k + bs] = data_mask01[k:k + bs].transpose((0, 2, 1, 3))
-        # else:  # shuffle mildly
-        #     rd_j, rd_k = rd.randint(0, int(ts * 0.5 - bs), size=2)
-        #     rd_k += int(ts * 0.5)
-        #
-        #     data_aerial[rd_j:rd_j + bs], data_aerial[rd_k:rd_k + bs] = \
-        #         data_aerial[rd_k:rd_k + bs], data_aerial[rd_j:rd_j + bs]
-        #     data_buffer[rd_j:rd_j + bs], data_buffer[rd_k:rd_k + bs] = \
-        #         data_buffer[rd_k:rd_k + bs], data_buffer[rd_j:rd_j + bs]
-        #     data_mask01[rd_j:rd_j + bs], data_mask01[rd_k:rd_k + bs] = \
-        #         data_mask01[rd_k:rd_k + bs], data_mask01[rd_j:rd_j + bs]
+        if epoch % 8 == 1:  # refresh circle(mask)
+            k = rd.randint(ts - bs)
+            data_aerial[k:k + bs, :, :, 3:4] = img_util.get_data__circle(bs, circle_num=3)
+        elif epoch % 8 == 5:  # np.rot90()
+            k = rd.randint(ts - bs)
+            data_aerial[k:k + bs] = data_aerial[k:k + bs].transpose((0, 2, 1, 3))
+            data_buffer[k:k + bs] = data_buffer[k:k + bs].transpose((0, 2, 1, 3))
+        else:  # shuffle mildly
+            rd_j, rd_k = rd.randint(0, int(ts * 0.5 - bs), size=2)
+            rd_k += int(ts * 0.5)
+
+            data_aerial[rd_j:rd_j + bs, :, :, 0:3], data_aerial[rd_k:rd_k + bs, :, :, 0:3] = \
+                data_aerial[rd_k:rd_k + bs, :, :, 0:3], data_aerial[rd_j:rd_j + bs, :, :, 0:3]
+            data_buffer[rd_j:rd_j + bs], data_buffer[rd_k:rd_k + bs] = \
+                data_buffer[rd_k:rd_k + bs], data_buffer[rd_j:rd_j + bs]
 
         for i in range(C.batch_epoch):
             j = i * bs
             feed_queue.put([data_aerial[j: j + bs],
-                            data_buffer[j: j + bs],
-                            data_mask01[j: j + bs], ])
+                            data_buffer[j: j + bs], ])
 
             while buff_queue.qsize() > 0:
                 k, buff_get = buff_queue.get()
-                l = rd.randint(0, bs - C.replace_num)
                 replace_idxs = rd.randint(0, bs, C.replace_num) if epoch != 0 else np.arange(bs)
                 for replace_idx in replace_idxs:
                     data_buffer[replace_idx + k] = buff_get[replace_idx]

@@ -2,8 +2,8 @@ import os
 
 
 class Config(object):
-    train_epoch = 2 ** 11
-    train_size = int(2 ** 18)
+    train_epoch = 2 ** 9
+    train_size = int(2 ** 17)
     eval_size = 2 ** 3
     batch_size = 2 ** 6
     batch_epoch = train_size // batch_size
@@ -32,9 +32,9 @@ class Config(object):
 if __name__ == '__main__':
     # from mod_GAN_poly import run
     # from mod_GAN_circle import run
-    # from mod_GAN_circle import run
-    from mod_replace import run
+    # from mod_replace import run
+    # from mod_mend import run
+    # from mod_mend_Unet import run
+    from beta import run
 
     run()
-    # from mod_defog import evaluation
-    # evaluation()
