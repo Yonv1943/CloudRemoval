@@ -8,17 +8,19 @@ from configure import Config
 
 C = Config()
 """
-2018-09-18 23:23:23 fix bug: img_grid() 
-2018-09-19 upgrade: img_grid(), random cut
-2018-10-21 'class Tools' move from mod_*.py to util.img_util.py 
-2018-10-21 poly, blur debug
-2018-10-24 stagger plot
+2018-09-18  23:23:23 fix bug: img_grid() 
+2018-09-19  upgrade: img_grid(), random cut
+2018-10-21  'class Tools' move from mod_*.py to util.img_util.py 
+2018-10-21  poly, blur debug
+2018-10-24  stagger plot
+2018-11-06  get_data__circle, circle_radius
+2018-11-14  image_we_have
 """
 
 
 class Tools(object):
     def img_check(self, img):
-        print("| min,max %6.2f %6.2f |%s", img.shape, np.min(img), np.max(img))
+        print("| min,max %6.2f %6.2f |%s" % (np.min(img), np.max(img), img.shape))
 
     def ary_check(self, ary):
         print("| min,max %6.2f %6.2f |ave,std %6.2f %6.2f |%s" %
@@ -26,13 +28,13 @@ class Tools(object):
 
     def draw_plot(self, log_txt_path):
         print("||" + self.draw_plot.__name__)
-        if not os.path.exists(log_txt_path):  # check
-            print("|NotExist:", log_txt_path)
+        if not os.path.getsize(log_txt_path):
+            print("| NotExist or NullFile:", log_txt_path)
             return None
 
         arys = np.loadtxt(log_txt_path)
         if arys.shape[0] < 2:
-            print("|Empty:", log_txt_path)
+            print("| Empty:", log_txt_path)
             return None
 
         if 'plt' not in globals():
@@ -149,7 +151,8 @@ def save_cloud_npy(img_path):
 def mp_pool(func, iterable):
     print("  mp_pool iterable: %6d |func: %s" % (len(iterable), func.__name__))
     import multiprocessing as mp
-    with mp.Pool(processes=min(16, mp.cpu_count() - 2)) as pool:
+
+    with mp.Pool(processes=min(16, (mp.cpu_count() - 2) // 2)) as pool:
         res = pool.map(func, iterable)
     return res
 
@@ -173,7 +176,13 @@ def get_data__aerial(data_size, channel=3):
     img_per_img = int((5000 // C.size) * (5000 // C.size))
     img_we_need = data_size // img_per_img + 1
 
-    img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))[:img_we_need]
+    img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))
+    from random import shuffle
+    shuffle(img_paths)
+    print('| Image we have:', len(img_paths))
+    print('| Image we need:', img_we_need)
+    img_paths = img_paths[:img_we_need]
+
     pooling_func = get_data__aerial_imgs if channel == 3 else get_data__greysc_imgs
     data_sets = mp_pool(func=pooling_func, iterable=img_paths)
 
@@ -237,12 +246,13 @@ def get_data__sqrt01(data_size):
     return np.concatenate(mats, axis=0)
 
 
-def get_data__circle(data_size):
+def get_data__circle(data_size, circle_num):
     mats = []
-    circle_xys = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, 2))
-    for cx, cy in circle_xys:
+    circle_xyrs = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, circle_num, 3))
+    for c123 in circle_xyrs:
         img = np.zeros((C.size, C.size))
-        img = cv2.circle(img, (cx, cy), C.size // 4, 1.0, cv2.FILLED)
+        for cx, cy, cr in c123:
+            img = cv2.circle(img, (cx, cy), int(cr * 0.75 / circle_num), 1.0, cv2.FILLED)
         # img = cv2.blur(img, (3, 3))[:, :, np.newaxis]  # 1943
 
         mats.append(img[np.newaxis, :, :, np.newaxis])
@@ -308,6 +318,13 @@ def get_aerial_continusly(ground, cloud1s):
         imgs.append(img)
 
     return imgs  # shape(w, h, 3), dtype(float32)(0.0, 1.0)
+
+
+def test():
+    cv2.namedWindow('beta', cv2.WINDOW_KEEPRATIO)
+    img = cv2.imread(os.path.join(C.aerial_dir, 'bellingham1.tif'))
+    cv2.imshow('beta', img)
+    cv2.waitKey(3456)
 
 
 if __name__ == '__main__':
