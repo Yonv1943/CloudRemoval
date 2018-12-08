@@ -9,7 +9,7 @@ import tensorflow as tf
 import tensorflow.layers as tl
 
 from configure import Config
-from utils import img_util
+from util import img_util
 
 '''
 Reference: https://github.com/jiamings/wgan
@@ -246,12 +246,12 @@ def process_train(feed_queue):  # model_train
                       inp_cloud3, ten_cloud3,
                       inp_ground, ten_ground, ]
 
-    # '''model check'''
-    # print("||Training Check")
-    # feed_list = feed_queue.get()
-    # feed_dict[inp_ground] = feed_list[0]
-    # feed_dict[inp_cloud1] = feed_list[1]
-    # sess.run([loss, optz], feed_dict)
+    '''model check'''
+    print("||Training Check")
+    feed_list = feed_queue.get()
+    feed_dict[inp_ground] = feed_list[0]
+    feed_dict[inp_cloud1] = feed_list[1]
+    sess.run([loss, optz], feed_dict)
 
     epoch = 0
     start_time = show_time = save_time = time.time()
@@ -279,7 +279,7 @@ def process_train(feed_queue):  # model_train
                 remain_time = (show_time - start_time) * remain_epoch / (epoch + 1)
                 print(end="\n|  %3d s |%3d epoch | Loss: %9.3e %9.3e"
                           % (remain_time, remain_epoch, loss_average[0], loss_average[1],))
-            if time.time() - save_time > C.eval_gap:
+            if time.time() - save_time > C.save_gap:
                 '''save model'''
                 save_time = time.time()
                 saver.save(sess, C.model_path, write_meta_graph=False)
@@ -299,9 +299,7 @@ def process_train(feed_queue):  # model_train
         saver.save(sess, C.model_path, write_meta_graph=False)
         print("\n| Save:", C.model_path)
 
-        mat_list = sess.run(eval_out_fetch, eval_feed_dict)
-        np.save('mat_list', np.array(mat_list))
-        T.eval_and_get_img(mat_list=mat_list, channel=3,
+        T.eval_and_get_img(mat_list=sess.run(eval_out_fetch, eval_feed_dict), channel=3,
                            img_path=os.path.join(C.model_dir, "eval-%08d.jpg"
                                                  % (previous_train_epoch + epoch)))
 
@@ -311,41 +309,22 @@ def process_train(feed_queue):  # model_train
     logger.close()
     sess.close()
 
-    # T.draw_plot(C.model_log)
+    T.draw_plot(C.model_log)
 
 
 def process_data(feed_queue):
     ts = C.train_size
     bs = C.batch_size
 
-    data_aerial = img_util.get_data__ground(ts, channel=3)
+    data_aerial = img_util.get_data__aerial(ts, channel=3)
     data_cloud1 = img_util.get_data__cloud1(ts)
     print("||Data_sets: ready for check")
-
-    # eval_id = rd.randint(ts // 2, ts, C.eval_size * 2)
-    # eval_id = list(set(eval_id))[:C.eval_size]
-    eval_cloud1 = cv2.imread('LMBIR2018-01-19-114407.jpg')
-    from util.img_util import Cloud2Grey
-    cloud2grey = Cloud2Grey()  # cloud2grey and save as npz
-    eval_cloud1 = cloud2grey.run(eval_cloud1)[:1060, :1920]
-    eval_cloud1 = cv2.resize(eval_cloud1, (eval_cloud1.shape[1] // 2, eval_cloud1.shape[0] // 2))  # resize
-    eval_cloud1 = cv2.blur(eval_cloud1, (3, 3))
-    eval_cloud1 = np.clip((eval_cloud1 - 20.0)*1.2, 0, 255)
-    T.ary_check(eval_cloud1)
-
-    x, y = 123, 234
-    eval_cloud1 = eval_cloud1[np.newaxis, x:x + C.size, y:y + C.size, np.newaxis]
-    x, y = 234, 4321
-    x, y = 2345, 4343
-    # x, y = 567, 4567
-    eval_aerial = cv2.imread('bellingham1.tif')[np.newaxis, x:x + C.size, y:y + C.size, 0:3]
-    # eval_aerial = cv2.imread('austin1.tif')[np.newaxis, x:x + C.size, y:y + C.size, 0:3]
-
-    feed_queue.put([eval_aerial / 255.0,
-                    eval_cloud1 / 255.0])  # for eval
-
-    # feed_queue.put([data_aerial[:bs],
-    #                 data_cloud1[:bs], ])  # for check
+    eval_id = rd.randint(ts // 2, ts, C.eval_size * 2)
+    eval_id = list(set(eval_id))[:C.eval_size]
+    feed_queue.put([data_aerial[eval_id],
+                    data_cloud1[eval_id]])  # for eval
+    feed_queue.put([data_aerial[:bs],
+                    data_cloud1[:bs], ])  # for check
 
     try:
         print("||Data_sets: ready for training")
@@ -415,11 +394,11 @@ def evaluation():
 
 def run():  # beta
     # T.draw_plot(C.model_log)
-    # if input("||PRESS 'y' to REMOVE model_dir? %s : " % C.model_dir) == 'y':
-    #     shutil.rmtree(C.model_dir, ignore_errors=True)
-    #     print("||REMOVE")
-    # else:
-    #     print("||KEEP")
+    if input("||PRESS 'y' to REMOVE model_dir? %s : " % C.model_dir) == 'y':
+        shutil.rmtree(C.model_dir, ignore_errors=True)
+        print("||REMOVE")
+    else:
+        print("||KEEP")
 
     import multiprocessing as mp
     feed_queue = mp.Queue(maxsize=8)
