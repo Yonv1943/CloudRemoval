@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 import tensorflow as tf
 
@@ -12,6 +13,7 @@ np.random.seed(1943)
 
 
 def save_npy(sess, model_npz):
+    timer = time.time()
     tf_vars = tf.global_variables()
 
     '''save as singal npy'''
@@ -30,7 +32,7 @@ def save_npy(sess, model_npz):
     #     v_name = str(v.name).replace('/', '-').replace(':', '.') + '.npy'
     #     np.save(os.path.join(C.model_npy, v_name), v.eval(session=sess))
     #     print("| SAVE %s.npy" % v.name) if print_info else None
-    print("  SAVE: %s" % model_npz)
+    print("  SAVE: %s ||Used: %i sec" % (model_npz, time.time() - timer))
 
 
 def update_npz(src_path, dst_path):
@@ -128,6 +130,8 @@ def draw_plot(log_txt_path):
     lines = []
     x_pts = np.arange(arys.shape[1])
     x_pts *= arys.shape[0]  # stagger
+
+    # for idx, ary in enumerate(arys[::arys_len // 128]):
     for idx, ary in enumerate(arys):
         x_pts += idx
         y_pts = ary[:, 0]

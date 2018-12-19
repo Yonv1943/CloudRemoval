@@ -206,9 +206,9 @@ def get_data__circle(data_size, circle_num):
     mats = []
     circle_xyrs = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, circle_num, 3))
     for c123 in circle_xyrs:
-        img = np.zeros((C.size, C.size))
+        img = np.zeros((C.size, C.size), np.uint8)
         for cx, cy, cr in c123:
-            img = cv2.circle(img, (cx, cy), int(cr * 0.75 / circle_num), 1.0, cv2.FILLED)
+            img = cv2.circle(img, (cx, cy), int(cr * 0.75 / circle_num), 255, cv2.FILLED)
         # img = cv2.blur(img, (3, 3))[:, :, np.newaxis]  # 1943
 
         mats.append(img[np.newaxis, :, :, np.newaxis])
@@ -284,6 +284,8 @@ def test():
 
 
 def get_eval_img(mat_list, img_path, channel):
+    # [print(mat.shape) for mat in mat_list]
+
     mats = np.concatenate(mat_list, axis=3)
     mats = np.clip(mats, 0.0, 1.0)
     out = []
@@ -296,5 +298,6 @@ def get_eval_img(mat_list, img_path, channel):
 
     img = np.concatenate(out, axis=1)
     cv2.imwrite(img_path, img)
+
 
 
