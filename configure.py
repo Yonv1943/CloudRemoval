@@ -10,11 +10,12 @@ class Config(object):
 
     size = int(2 ** 7)
     replace_num = int(0.368 * batch_size)
+    learning_rate = 8e-5  # 1e-4
 
-    show_gap = 2 ** 4  # time
-    eval_gap = 2 ** 4  # time
-    gpu_limit = 0.48  # 0.0 ~ 1.0
-    gpu_id = 1
+    show_gap = 2 ** 2  # time
+    eval_gap = 2 ** 2  # time
+    gpu_limit = 0.8  # 0.0 ~ 1.0
+    gpu_id = 0
 
     data_dir = '/mnt/sdb1/data_sets'
     aerial_dir = os.path.join(data_dir, 'AerialImageDataset/train')
@@ -30,13 +31,32 @@ class Config(object):
 
 
 def run():
+    import cv2
+    import numpy as np
+    from utils import img_util
+
+    # np.median(ary) == np.percentile(ary, 50)
+    # np.quantile(ary) == np.percentile(ary, 75)
+    # thr = cv2.threshold(img, np.percentile(img, 85), 255, cv2.THRESH_BINARY)[1]
+    imgs = img_util.get_data__cloud1(32)
+    thrs = np.percentile(imgs, 85, axis=(1, 2, 3), keepdims=True)
+    imgs[imgs < thrs] = 0
+    imgs[imgs >= thrs] = 255
+
+    for img in imgs:
+
+        cv2.imshow('', img)
+        cv2.waitKey(423)
     pass
 
 
 if __name__ == '__main__':
     # from mod_haze_unet import run
-    # from mod_mend_GAN_resize import run
-    from mod_mend_GAN_buff import run
+    # from mod_mend_GAN_circle import run
+    # from mod_mend_GAN_patch import run
+    # from mod_mend_GAN_label import run
+    from mod_mend_beta import run
+    # from mod_mend_buff import run
 
     # from beta import run
     run()
