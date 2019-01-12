@@ -84,6 +84,7 @@ def get_sess(c):
 
 def get_saver_logger(c, sess):
     saver = tf.train.Saver(max_to_keep=4)
+    # print(get_saver_logger.__name__, 'model_dir:', c.model_dir)
     if os.path.exists(os.path.join(c.model_dir, 'checkpoint')):
         # C.model_path = tf.train.latest_checkpoint(C.model_dir)
         saver.restore(sess, c.model_path)

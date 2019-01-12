@@ -2,25 +2,25 @@ import os
 
 
 class Config(object):
-    train_epoch = 2 ** 11
-    train_size = int(2 ** 11 * 1.8)
+    train_epoch = 2 ** 9
+    train_size = int(2 ** 10)
     eval_size = 2 ** 3
-    batch_size = 2 ** 4
+    batch_size = int(2 ** 4 * 1.25)
     batch_epoch = train_size // batch_size
 
-    size = int(2 ** 7)
+    size = int(2 ** 8)  # int(2 ** 7)
     replace_num = int(0.368 * batch_size)
     learning_rate = 8e-5  # 1e-4
 
     show_gap = 2 ** 2  # time
     eval_gap = 2 ** 2  # time
-    gpu_limit = 0.8  # 0.0 ~ 1.0
-    gpu_id = 0
+    gpu_limit = 0.9  # 0.0 ~ 1.0
+    gpu_id = 1
 
     data_dir = '/mnt/sdb1/data_sets'
     aerial_dir = os.path.join(data_dir, 'AerialImageDataset/train')
     cloud_dir = os.path.join(data_dir, 'ftp.nnvl.noaa.gov_color_IR_2018')
-    grey_dir = os.path.join(data_dir, 'CloudGreyDataset')
+    grey_dir = os.path.join(data_dir, 'CloudGreyDataset_%dx%d' % (size, size))
 
     def __init__(self, model_dir='mod'):
         self.model_dir = model_dir
@@ -44,19 +44,22 @@ def run():
     imgs[imgs >= thrs] = 255
 
     for img in imgs:
-
         cv2.imshow('', img)
         cv2.waitKey(423)
     pass
 
 
 if __name__ == '__main__':
-    # from mod_haze_unet import run
-    # from mod_mend_GAN_circle import run
-    # from mod_mend_GAN_patch import run
-    # from mod_mend_GAN_label import run
-    from mod_mend_beta import run
-    # from mod_mend_buff import run
-
     # from beta import run
+    # from mod_eval import run
+    from mod_replace import run
+
+    # from mod_haze_unet import run
+    # from mod_mend_buff import run
+    # from mod_mend_buff_rd import run
+    # from mod_mend_disc import run
+    # from mod_mend_in_norm import run
+    # from mod_mend_circle import run
+    # from mod_mend_unet import run
+
     run()

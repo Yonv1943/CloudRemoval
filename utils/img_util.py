@@ -172,14 +172,23 @@ def get_data__greysc_imgs(img_path):
     return imgs
 
 
+def get_data__cloud1_imgs(npy_path):
+    imgs = np.load(npy_path)['arr_0']
+    # imgs = imgs.astype(np.float32) / 255.0
+    return imgs
+
+
 def get_data__ground(data_size, channel=3):
     img_per_img = int((5000 // C.size) * (5000 // C.size))
     img_we_need = data_size // img_per_img + 1
 
     img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))
-    from random import shuffle
-    shuffle(img_paths)
     print('  Image we have: %s  we need: %s' % (len(img_paths), img_we_need))
+    if img_we_need > len(img_paths):
+        aerial_test = os.path.join(C.data_dir, 'AerialImageDataset/test')
+        img_paths.extend(glob.glob(os.path.join(aerial_test, '*.tif')))
+        print('  Image we have: %s  we need: %s' % (len(img_paths), img_we_need))
+
     img_paths = img_paths[:img_we_need]
 
     pooling_func = get_data__aerial_imgs if channel == 3 else get_data__greysc_imgs
@@ -208,41 +217,48 @@ def get_data__circle(data_size, circle_num):
     for c123 in circle_xyrs:
         img = np.zeros((C.size, C.size), np.uint8)
         for cx, cy, cr in c123:
-            img = cv2.circle(img, (cx, cy), int(cr * 0.75 / circle_num), 255, cv2.FILLED)
+            img = cv2.circle(img, (cx, cy), int(cr * 0.5 / circle_num), 255, cv2.FILLED)
         # img = cv2.blur(img, (3, 3))[:, :, np.newaxis]  # 1943
 
         mats.append(img[np.newaxis, :, :, np.newaxis])
     return np.concatenate(mats, axis=0)
 
 
-def get_data__cloud1_imgs(npy_path):
-    imgs = np.load(npy_path)['arr_0']
-    # imgs = imgs.astype(np.float32) / 255.0
-    return imgs
-
-
 def get_data__cloud1(data_size):
-    """cloud_npy"""
     img_per_npy = int((1060 / 2 // C.size) * (1920 / 2 // C.size))
     img_we_need = data_size // img_per_npy + 1
 
-    img_paths = glob.glob(os.path.join(C.cloud_dir, '*.jpg'))
-    img_paths = img_paths[:img_we_need]
-
-    os.makedirs(C.grey_dir, exist_ok=True)
-    npy_names = set([p[:-4] for p in os.listdir(C.grey_dir)])
-    img_paths = [p for p in img_paths if os.path.basename(p)[:-4] not in npy_names]
-    mp_pool(func=save_cloud_npy, iterable=img_paths)
-
     """cloud_data_set"""
-    npy_paths = glob.glob(os.path.join(C.grey_dir, '*.npz'))[:img_we_need]
-    data_sets = mp_pool(func=get_data__cloud1_imgs, iterable=npy_paths)
+    npy_paths = glob.glob(os.path.join(C.grey_dir, '*.npz'))
+    print('  npy we have: %s  we need: %s' % (len(npy_paths), img_we_need))
+    if img_we_need > len(npy_paths):
+        img_paths = glob.glob(os.path.join(C.cloud_dir, '*.jpg'))
 
+        if img_we_need > len(img_paths):
+            cloud_dir_2017 = os.path.join(C.data_dir, 'ftp.nnvl.noaa.gov_color_IR_2017')
+            img_paths.extend(glob.glob(os.path.join(cloud_dir_2017, '*.jpg')))
+        img_paths = img_paths[:img_we_need]
+        print('img', len(img_paths))
+
+        """cloud_npy"""
+        os.makedirs(C.grey_dir, exist_ok=True)
+        npy_names = set([p[:-4] for p in os.listdir(C.grey_dir)])
+        img_paths = [p for p in img_paths if os.path.basename(p)[:-4] not in npy_names]
+        mp_pool(func=save_cloud_npy, iterable=img_paths)
+        npy_paths = glob.glob(os.path.join(C.grey_dir, '*.npz'))
+        print('  npy we have: %s  we need: %s' % (len(npy_paths), img_we_need))
+    npy_paths = npy_paths[:img_we_need]
+
+    data_sets = mp_pool(func=get_data__cloud1_imgs, iterable=npy_paths)
     data_sets_shape = list(data_sets[0].shape)
     data_sets_shape[0] = -1
 
     data_set = np.reshape(data_sets, data_sets_shape)
-    data_set = data_set[:data_size]
+
+    if len(data_set) > data_size:
+        data_set = data_set[:data_size]
+    else:  # add
+        data_set = np.concatenate((data_set, data_set[:data_size - len(data_set)]))
 
     print("  %s | shape: %s" % (get_data__cloud1.__name__, data_set.shape))
     return data_set
@@ -285,6 +301,10 @@ def test():
 
 def get_eval_img(mat_list, img_path, channel):
     # [print(mat.shape) for mat in mat_list]
+    ary_repeat = np.ones((1, 1, 1, 3))
+    for i in range(len(mat_list)):
+        if mat_list[i].shape[3] != 3:
+            mat_list[i] = mat_list[i] * ary_repeat
 
     mats = np.concatenate(mat_list, axis=3)
     mats = np.clip(mats, 0.0, 1.0)
@@ -298,6 +318,3 @@ def get_eval_img(mat_list, img_path, channel):
 
     img = np.concatenate(out, axis=1)
     cv2.imwrite(img_path, img)
-
-
-
