@@ -33,33 +33,29 @@ class Config(object):
 def run():
     import cv2
     import numpy as np
-    from utils import img_util
 
-    # np.median(ary) == np.percentile(ary, 50)
-    # np.quantile(ary) == np.percentile(ary, 75)
-    # thr = cv2.threshold(img, np.percentile(img, 85), 255, cv2.THRESH_BINARY)[1]
-    imgs = img_util.get_data__cloud1(32)
-    thrs = np.percentile(imgs, 85, axis=(1, 2, 3), keepdims=True)
-    imgs[imgs < thrs] = 0
-    imgs[imgs >= thrs] = 255
+    idxs  = set([int(n[:6]) for n in os.listdir('result')])
+    dilate_kernel = np.ones((3, 3))
+    for i in idxs:
+        aerial = cv2.imread('result/%06d-4-aerial.png' % i)
+        mask01 = cv2.imread('result/%06d-0-cloud3.png' % i)
+        mask01 = cv2.dilate(mask01, dilate_kernel)
 
-    for img in imgs:
-        cv2.imshow('', img)
-        cv2.waitKey(423)
+        result = aerial
+        cv2.imwrite('result_dict/%06d-3-result-thin.png' % i, result)
+
     pass
 
 
-if __name__ == '__main__':
-    # from beta import run
-    # from mod_eval import run
-    from mod_replace import run
 
-    # from mod_haze_unet import run
-    # from mod_mend_buff import run
-    # from mod_mend_buff_rd import run
-    # from mod_mend_disc import run
-    # from mod_mend_in_norm import run
-    # from mod_mend_circle import run
-    # from mod_mend_unet import run
+
+
+
+if __name__ == '__main__':
+    # from mod_eval import run
+    # from mod_replace import run
+
+    # from mod_cloud_detect import run
+    # from mod_cloud_remove import run
 
     run()

@@ -5,6 +5,7 @@ import time
 import cv2
 import numpy as np
 import numpy.random as rd
+from itertools import product as iter_product
 from configure import Config
 
 C = Config()
@@ -92,13 +93,15 @@ class Cloud2Grey(object):
         for i, j, x, y in self.map_pts:  # eliminate white line
             img[i, j] = img[x, y]
 
-        switch = np.array(img[:, :, 2], dtype=np.int) - img[:, :, 0]
-        switch = np.clip(switch - 4, 0, 1)  # The part with thick cloud, could not see the ground
+        thold = np.array(img[:, :, 2], dtype=np.int) - img[:, :, 0]
+
+        # thold = np.heaviside(thold - 4, 0)
+        thold = np.clip(thold - 4, 0, 1)  # The part with thick cloud, could not see the ground
 
         out = np.clip(img[:, :, 1], 60, 195)
         gray = out - 60
         green = 60 - out
-        out = gray * (1 - switch) + green * switch
+        out = gray * (1 - thold) + green * thold
         return out.astype(np.uint8)
 
 
@@ -118,20 +121,78 @@ def cover_cloud_mask(img, cloud):
     return img.astype(np.uint8)
 
 
-def img_grid(img, channel=3):
-    xlen, ylen = img.shape[0:2]
-    xmod = xlen % C.size
-    ymod = ylen % C.size
+def img_grid(img, size, random_cut=True):
+    # def img_grid_reverse(imgs, x_num, y_num):
+    #     x_size, y_size, channel = imgs.shape[-3:]
+    #     imgs = imgs.reshape((x_num, y_num, x_size, y_size, channel))
+    #     imgs = imgs.transpose((0, 2, 1, 3, 4))
+    #     img = imgs.reshape((x_num * x_size, y_num * y_size, channel))
+    #     return img
+    """
+    x_len, y_len
+    random_cut
+    """
+    x_len, y_len, channel = img.shape[0:3]
+    x_mod = x_len % size
+    y_mod = y_len % size
+    # print("%s:" % img_grid.__name__, x_len // size, y_len // size, size)  # for img_grid_reverse()
 
-    xrnd = int(rd.rand() * xmod)
-    yrnd = int(rd.rand() * ymod)
+    if random_cut:
+        x_beg = int(rd.rand() * x_mod)
+        x_end = x_beg - x_mod if x_beg != x_mod else None
+        y_beg = int(rd.rand() * y_mod)
+        y_end = y_beg - y_mod if y_beg != y_mod else None
 
-    img = img[xrnd:xrnd - xmod, yrnd:yrnd - ymod]  # cut img
+        img = img[x_beg:x_end, y_beg:y_end]  # cut img
+    else:
+        img = img[x_mod:, y_mod:]
 
-    imgs = img.reshape((-1, C.size, ylen // C.size, C.size, channel))
+    imgs = img.reshape((-1, size, y_len // size, size, channel))
     imgs = imgs.transpose((0, 2, 1, 3, 4))
-    imgs = imgs.reshape((-1, C.size, C.size, channel))
+    imgs = imgs.reshape((-1, size, size, channel))
     return imgs
+
+
+def slide_window(img, size, pads):
+    len0, len1 = img.shape[0:2]
+
+    num0 = len0 // size
+    num1 = len1 // size
+    num0 = num0 if len0 % size == 0 else num0 + 1
+    num1 = num1 if len1 % size == 0 else num1 + 1
+
+    img = np.pad(img, ((pads, pads + num0 * size),
+                       (pads, pads + num1 * size), (0, 0)), 'reflect')
+
+    grids = list()
+    win_size = size + 2 * pads
+    for i, j in iter_product(range(0, num0 * size, size),
+                             range(0, num1 * size, size)):
+        grid = img[i:i + win_size, j:j + win_size]
+        grids.append(grid)
+    grids = np.stack(grids, axis=0)  # grids = np.concatenate(grids[np.newaxis, :, :, :], axis=0)
+    # slide_info = (size, pads, len0, len1, num0, num1)
+    # return grids, slide_info
+    return grids
+
+
+def slide_window_reverse(grids, info):
+    (size, pads, len0, len1, num0, num1) = info
+    img = np.empty((size * num0,
+                    size * num1, 3), grids.dtype)
+
+    iter_grid = iter(grids[:, pads:pads + size, pads:pads + size])
+    for i, j in iter_product(range(0, num0 * size, size),
+                             range(0, num1 * size, size)):
+        img[i:i + size, j:j + size] = next(iter_grid)
+    img = img[:len0, :len1]
+    return img
+
+
+def img_show(img, wait_key=1, win_name='Check'):
+    img = np.clip(img, 0, 255).astype(np.uint8)
+    cv2.imshow(win_name, img)
+    cv2.waitKey(wait_key)
 
 
 def save_cloud_npy(img_path):
@@ -140,7 +201,7 @@ def save_cloud_npy(img_path):
     img = cv2.resize(img, (img.shape[1] // 2, img.shape[0] // 2))  # resize
     img = cv2.blur(img, (3, 3))
 
-    imgs = img_grid(img, channel=1).astype(np.float32)
+    imgs = img_grid(img, C.size).astype(np.float32)
     imgs = (imgs - imgs.min(axis=(1, 2, 3)).reshape((-1, 1, 1, 1)))
     imgs = imgs * (255.0 / ((imgs.max(axis=(1, 2, 3)) + 1.0).reshape((-1, 1, 1, 1))))
 
@@ -150,7 +211,7 @@ def save_cloud_npy(img_path):
 
 
 def mp_pool(func, iterable):
-    print("  mp_pool iterable: %6d |func: %s" % (len(iterable), func.__name__))
+    # print("  mp_pool iterable: %6d |func: %s" % (len(iterable), func.__name__))
     import multiprocessing as mp
 
     with mp.Pool(processes=min(16, (mp.cpu_count() - 2) // 2)) as pool:
@@ -158,17 +219,13 @@ def mp_pool(func, iterable):
     return res
 
 
-def get_data__aerial_imgs(img_path):
+def get_data__aerial_imgs(img_path, pads=8):
     img = cv2.imread(img_path)
-    imgs = img_grid(img, channel=3)
-    # imgs = imgs.astype(np.float32) / 255.0
-    return imgs
+    # imgs = img_grid(img, C.size)
 
-
-def get_data__greysc_imgs(img_path):
-    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    imgs = img_grid(img, channel=1)
-    # imgs = imgs.astype(np.float32) / 255.0
+    size = C.size - pads * 2
+    imgs = slide_window(img, size, pads)
+    # print(len(imgs))
     return imgs
 
 
@@ -178,12 +235,12 @@ def get_data__cloud1_imgs(npy_path):
     return imgs
 
 
-def get_data__ground(data_size, channel=3):
-    img_per_img = int((5000 // C.size) * (5000 // C.size))
+def get_data__ground(data_size):
+    img_per_img = len(slide_window(np.empty((5000, 5000, 3), np.uint8), C.size - 8 * 2, 8))  # pads=8
     img_we_need = data_size // img_per_img + 1
 
     img_paths = glob.glob(os.path.join(C.aerial_dir, '*.tif'))
-    print('  Image we have: %s  we need: %s' % (len(img_paths), img_we_need))
+    print('  img we have: %s  we need: %s' % (len(img_paths), img_we_need))
     if img_we_need > len(img_paths):
         aerial_test = os.path.join(C.data_dir, 'AerialImageDataset/test')
         img_paths.extend(glob.glob(os.path.join(aerial_test, '*.tif')))
@@ -191,7 +248,7 @@ def get_data__ground(data_size, channel=3):
 
     img_paths = img_paths[:img_we_need]
 
-    pooling_func = get_data__aerial_imgs if channel == 3 else get_data__greysc_imgs
+    pooling_func = get_data__aerial_imgs
     data_sets = mp_pool(func=pooling_func, iterable=img_paths)
 
     data_sets_shape = list(data_sets[0].shape)
@@ -200,7 +257,7 @@ def get_data__ground(data_size, channel=3):
     data_set = np.reshape(data_sets, data_sets_shape)
     data_set = data_set[:data_size]
 
-    print("  %s | shape: %s" % (get_data__ground.__name__, data_set.shape))
+    # print("  %s | shape: %s" % (get_data__ground.__name__, data_set.shape))
     return data_set
 
 
@@ -211,13 +268,13 @@ def get_data__mask01(data_size, channel=1):
     return ten
 
 
-def get_data__circle(data_size, circle_num):
+def get_data__circle(data_size, circle_num, radius_rate=0.25):
     mats = []
     circle_xyrs = rd.randint(0.25 * C.size, 0.75 * C.size, (data_size, circle_num, 3))
     for c123 in circle_xyrs:
         img = np.zeros((C.size, C.size), np.uint8)
         for cx, cy, cr in c123:
-            img = cv2.circle(img, (cx, cy), int(cr * 0.5 / circle_num), 255, cv2.FILLED)
+            img = cv2.circle(img, (cx, cy), int(cr * radius_rate), 255, cv2.FILLED)
         # img = cv2.blur(img, (3, 3))[:, :, np.newaxis]  # 1943
 
         mats.append(img[np.newaxis, :, :, np.newaxis])
@@ -299,7 +356,7 @@ def test():
     cv2.waitKey(3456)
 
 
-def get_eval_img(mat_list, img_path, channel):
+def get_eval_img(mat_list, img_path, channel, img_write=True):
     # [print(mat.shape) for mat in mat_list]
     ary_repeat = np.ones((1, 1, 1, 3))
     for i in range(len(mat_list)):
@@ -317,4 +374,9 @@ def get_eval_img(mat_list, img_path, channel):
         out.append(mat)
 
     img = np.concatenate(out, axis=1)
-    cv2.imwrite(img_path, img)
+
+    if img_write:
+        cv2.imwrite(img_path, img)
+    else:
+        cv2.imshow('', img)
+        cv2.waitKey(1)

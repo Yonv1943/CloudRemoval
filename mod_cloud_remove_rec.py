@@ -14,26 +14,13 @@ from utils import img_util
     Reference: https://github.com/jiamings/wgan
     Reference: https://github.com/cameronfabbri/Improved-Wasserstein-GAN
     Reference: https://github.com/znxlwm/tensorflow-MNIST-GAN-DCGAN
-2018-10-11 save eval jpg
-2018-10-12 'TF_CPP_MIN_LOG_LEVEL' tf.Session()
-2018-10-12 origin, tensorflow.contrib.layers --> tf.layers
-2018-10-22 change mask from 'middle square' to 'spot'
-2018-10-23 spot --> polygon
-2018-10-23 for discriminator, tf.concat([tenx, mask], axis=0)
-2018-11-25 kernel3 better than kernel2, but little grid
-2018-11-29 load uint8
-2018-12-07 resize, buff
-2018-12-15 beta, data_feed,
-2018-12-15 simplify, reconstruction
-2018-12-18 auto-encoder update
-2018-12-19 stable
 2018-12-29 stable
 """
 
 
 class Config(object):
-    train_epoch = 2 ** 14
-    train_size = int(2 ** 17 * 0.99)
+    train_epoch = int(2 ** 13 * 1.5)
+    train_size = int(2 ** 17 * 1.2)
     eval_size = 2 ** 4 - 2  # 2 ** 3
     batch_size = int(2 ** 4)
     batch_epoch = train_size // batch_size
@@ -45,7 +32,7 @@ class Config(object):
     show_gap = 2 ** 7  # time
     eval_gap = 2 ** 11  # time
     gpu_limit = 0.9  # 0.0 ~ 1.0
-    gpu_id = 1
+    gpu_id = 0
 
     data_dir = '/mnt/sdb1/data_sets'
     aerial_dir = os.path.join(data_dir, 'AerialImageDataset/train')
@@ -65,16 +52,15 @@ if __name__ != '__main__':
 
     print("|| TEST")
 
-C = Config('mod_mend_nres')
+C = Config('mod_cloud_remove_rec')
 tf.set_random_seed(time.time() * 1943 % 178320049)
 
 
-def auto_encoder(inp0, dim, out_dim, name, reuse, trainable=True):
+def auto_encoder(inp0, dim, out_dim, name, reuse, training=True):
     padding1 = tf.constant(((0, 0), (1, 1), (1, 1), (0, 0)))
-    padding2 = tf.constant(((0, 0), (2, 2), (2, 2), (0, 0)))
 
     def leru_batch_norm(ten):
-        ten = tl.batch_normalization(ten, training=trainable)
+        ten = tl.batch_normalization(ten, training=training)
         ten = tf.nn.leaky_relu(ten)
         return ten
 
@@ -89,17 +75,8 @@ def auto_encoder(inp0, dim, out_dim, name, reuse, trainable=True):
         ten = tl.conv2d(ten, filters, 3, step, 'valid', activation=tf.nn.leaky_relu)
         return ten
 
-    def conv_pad2(ten, idx, step=1):
-        filters = (2 ** idx) * dim
-        ten = tf.pad(ten, padding2, 'REFLECT')
-        ten = tl.conv2d(ten, filters, 3, step, 'valid',
-                        dilation_rate=(2, 2),
-                        activation=tf.nn.leaky_relu)
-        return ten
-
     def conv_res(ten, idx):
-        # return conv_pad1(conv_pad2(ten, idx), idx) + ten
-        return conv_pad1(conv_pad2(ten, idx), idx) + conv_pad1(ten, idx)
+        return conv_pad1(conv_pad1(ten, idx), idx) + conv_pad1(ten, idx)
 
     with tf.variable_scope(name, reuse=reuse):
         ten1 = conv_pad1(inp0, 0, 2)
@@ -173,8 +150,16 @@ def init_train():
     # dif_patch3 = ten_ground - ten_patch3
     # dif_patch3 = tf.image.resize_images(dif_patch3, (C.size//4, C.size//4))
 
+    # loss_gene = tf.reduce_mean((zero_mask1 - dis_fake_1) ** 2 * 3)
+    # loss_gene += tf.reduce_mean((ten_ground - ten_patch3) ** 2)
+    #
+    # loss_disc = tf.reduce_mean((zero_mask1 - dis_real_1) ** 2)
+    # loss_disc += tf.reduce_mean((ten_mask01 - dis_fake_1) ** 2)
+    # loss_disc += tf.reduce_mean((ten_mskbuf - dis_buff_1) ** 2)  # buffer
+
     loss_gene = tf.losses.mean_pairwise_squared_error(zero_mask1, dis_fake_1) * 2
-    loss_gene += tf.losses.mean_pairwise_squared_error(ten_ground, ten_patch3)
+    loss_gene += tf.losses.mean_pairwise_squared_error(ten_ground * ten_mask01,
+                                                       ten_patch3 * ten_mask01)
 
     loss_disc = tf.losses.mean_pairwise_squared_error(zero_mask1, dis_real_1)
     loss_disc += tf.losses.mean_pairwise_squared_error(ten_mask01, dis_fake_1)
@@ -222,9 +207,6 @@ def process_train(feed_queue, buff_queue):
             batch_losses = list()  # init
             for i in range(C.batch_size):
                 batch_data = feed_queue.get()
-                # cv2.imshow('', np.concatenate((batch_data[3][0, :, :, 0:1],
-                #                                batch_data[4][0]), axis=0))
-                # cv2.waitKey(1)
 
                 idx = batch_data[0]
                 batch_dict = {
@@ -235,10 +217,10 @@ def process_train(feed_queue, buff_queue):
                 }
 
                 # fetch[3] = optz_disc
-                if loss_gene * 8 < loss_disc:
-                    fetch[3] = optz_disc
-                elif loss_disc * 8 < loss_gene:
+                if loss_disc * 8 < loss_gene:
                     fetch[3] = optz_gene
+                # elif loss_gene * 8 < loss_disc:
+                #     fetch[3] = optz_disc
                 else:
                     fetch[3] = (optz_gene, optz_disc)
 
@@ -247,9 +229,7 @@ def process_train(feed_queue, buff_queue):
                 buff_queue.put((idx, buf_ground, buf_mask01))
 
             loss_average = np.mean(batch_losses, axis=0)
-            loss_error = np.std(batch_losses, axis=0)
-            logger.write('%e %e %e %e\n' % (loss_average[0], loss_error[0],
-                                            loss_average[1], loss_error[1],))
+            logger.write('%e %e\n' % (loss_average[0], loss_average[1]))
 
             if time.time() - show_time > C.show_gap:
                 show_time = time.time()
@@ -267,23 +247,23 @@ def process_train(feed_queue, buff_queue):
                                       img_path="%s/eval-%08d.jpg" % (C.model_dir, pre_epoch + epoch))
                 print(end="  EVAL %d" % (pre_epoch + epoch))
 
-    except KeyboardInterrupt:
-        print("\n| KeyboardInterrupt:", process_train.__name__)
-    print("\n")
-    print('| Train_epoch: %d' % C.train_epoch)
-    print('| Batch_epoch: %dx%d' % (C.batch_epoch, C.batch_size))
-    print('| TimeUsed:    %d' % int(time.time() - start_time))
+            if os.path.exists(os.path.join(C.model_dir, 'SAVE.MARK')):
+                os.remove(os.path.join(C.model_dir, 'SAVE.MARK'))
+                print("\n||Break Training and save:", process_train.__name__)
+                break
 
+    except KeyboardInterrupt:
+        print("\n||Break Training and save:", process_train.__name__)
+    print('\n  TimeUsed:    %d' % int(time.time() - start_time))
+    saver.save(sess, C.model_path, write_meta_graph=False)
+    print("  SAVE: %s" % C.model_path)
     img_util.get_eval_img(mat_list=sess.run(eval_fetch, eval_feed_dict), channel=3,
                           img_path="%s/eval-%08d.jpg" % (C.model_dir, 0))
-    saver.save(sess, C.model_path, write_meta_graph=False)
-    print("| SAVE: %s" % C.model_path)
-    mod_util.save_npy(sess, C.model_npz)
 
     logger.close()
     sess.close()
 
-    mod_util.draw_plot(C.model_log)
+    os.rmdir(os.path.join(C.model_dir, 'TRAINING.MARK'))
 
 
 def process_feed(feed_queue, buff_queue):
@@ -304,19 +284,18 @@ def process_feed(feed_queue, buff_queue):
         return mats
 
     timer = time.time()
-    grounds = img_util.get_data__ground(ts, channel=3)
-    print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
-    mask01s = img_util.get_data__cloud1(ts)
-    print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
+    grounds = img_util.get_data__ground(ts)
+    print("  Dataset grounds. Used time:", int(time.time() - timer))
+    np.random.shuffle(grounds)
+    print("  Dataset shuffle. Used time:", int(time.time() - timer))
     grounds_buff = np.copy(grounds)
-    print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
+    print("  Dataset buffers. Used time:", int(time.time() - timer))
+    mask01s = img_util.get_data__cloud1(ts)
+    print("  Dataset mask01s. Used time:", int(time.time() - timer))
     mask01s_buff = np.zeros_like(mask01s)
-    print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
-    rd_shuffle(grounds)
-    print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
+    print("  Dataset buffers. Used time:", int(time.time() - timer))
 
-    eval_id = np.random.randint(ts // 2, ts, C.eval_size * 4)
-    eval_id = list(set(eval_id))[:C.eval_size]
+    eval_id = list(set(np.random.randint(0, ts, C.eval_size * 4)))[:C.eval_size]
     feed_queue.put([grounds[eval_id],
                     get_mask01(mask01s[eval_id]),
                     grounds_buff[eval_id],
@@ -326,15 +305,6 @@ def process_feed(feed_queue, buff_queue):
     i0_range = np.arange(C.batch_epoch)
     i1_range = np.arange(C.batch_epoch)
     replace_ids = np.arange(C.batch_size)
-
-    # grounds_buff = []
-    # for ground, mask01 in zip(grounds, mask01s):
-    #     mask10 = 1 - mask01s / 255
-    #     ground *= mask10
-    #     grounds_buff.append(ground)
-    # grounds_buff = np.array(grounds_buff)
-    # rd_shuffle(grounds)
-    # print("||Data_sets: ready for check. Used time:", int(time.time() - timer))
 
     def batch_op0(j, k):
         j *= bs
@@ -363,11 +333,11 @@ def process_feed(feed_queue, buff_queue):
         if switch == 0:
             grounds[j:j + bs] = np.rot90(grounds[j:j + bs], axes=(1, 2))
         elif switch == 1:
-            grounds[j:j + bs] = grounds[j:j + bs, ::-1]  # image flipped
+            grounds[j:j + bs] = np.flip(grounds[j:j + bs], axis=rd_randint(1, 3))
         elif switch == 2:
             mask01s[j:j + bs] = np.rot90(mask01s[j:j + bs], axes=(1, 2))
         elif switch == 3:
-            mask01s[j:j + bs] = mask01s[j:j + bs, ::-1]  # image flipped
+            mask01s[j:j + bs] = np.flip(mask01s[j:j + bs], axis=rd_randint(1, 3))
         elif switch == 4 and not j <= q <= j + bs:
             grounds[j:j + bs], grounds[q:q + bs] = grounds[q:q + bs], grounds[j:j + bs]
         elif switch == 5 and not j <= q <= j + bs:
@@ -389,33 +359,32 @@ def process_feed(feed_queue, buff_queue):
                 grounds_buff[replace_id + idx] = grounds_get[replace_id]
                 mask01s_buff[replace_id + idx] = cloud1s_get[replace_id]
 
-    try:
-        for _ in (0,):
-            for i in range(C.batch_epoch):
-                batch_op0(i, i)
-        for _ in range(1, C.train_epoch):
-            rd_shuffle(i0_range)
-            rd_shuffle(i1_range)
-            for i0, i1 in zip(i0_range, i1_range):
-                batch_opn(i0, i1)
-
-    except KeyboardInterrupt:
-        print("| KeyboardInterrupt:", process_feed.__name__)
-    print("| quit:", process_feed.__name__)
+    for _ in (0,):
+        for i in range(C.batch_epoch):
+            batch_op0(i, i)
+    for _ in range(1, C.train_epoch):
+        rd_shuffle(i0_range)
+        rd_shuffle(i1_range)
+        for i0, i1 in zip(i0_range, i1_range):
+            batch_opn(i0, i1)
 
 
 def run():
-    print('| GPU ID     : %d' % C.gpu_id)
-    print('| Train_epoch: %d' % C.train_epoch)
-    print('| Batch_epoch: %dx%d' % (C.batch_epoch, C.batch_size))
-    if input("||PRESS 'y' to REMOVE model_dir? %s: " % C.model_dir) == 'y':
+    print('||GPUid: %d' % C.gpu_id)
+    print('||Epoch: %d' % C.train_epoch)
+    print('||Batch: %d' % C.batch_size)
+    print('||Model: %s' % C.model_dir)
+    if input("||PRESS: 'y' to REMOVE? ") == 'y':
         shutil.rmtree(C.model_dir, ignore_errors=True)
         print("||Remove")
-    elif input("||PRESS 'y' to UPDATE model_npz? %s: " % C.model_npz) == 'y':
-        mod_util.update_npz(src_path='%s/mod.npz' % C.model_dir, dst_path=C.model_npz)
-
-        remove_path = os.path.join(C.model_dir, 'checkpoint')
-        os.remove(remove_path) if os.path.exists(remove_path) else None
+    # elif input("||PRESS 'y' to UPDATE model_npz? %s: " % C.model_npz) == 'y':
+    #     # mod_util.save_npy(sess, C.model_npz)
+    #     # mod_util.draw_plot(C.model_log)
+    #
+    #     mod_util.update_npz(src_path='mod_AutoEncoder/mod.npz', dst_path=C.model_npz)
+    #
+    #     remove_path = os.path.join(C.model_dir, 'checkpoint')
+    #     os.remove(remove_path) if os.path.exists(remove_path) else None
 
     import multiprocessing as mp
     feed_queue = mp.Queue(maxsize=8)
@@ -423,8 +392,14 @@ def run():
     process = [mp.Process(target=process_feed, args=(feed_queue, buff_queue)),
                mp.Process(target=process_train, args=(feed_queue, buff_queue)), ]
 
+    os.makedirs(os.path.join(C.model_dir, 'TRAINING.MARK'), exist_ok=True)
     [p.start() for p in process]
-    [p.join() for p in process]
+
+    # [p.join() for p in process]
+    while os.path.exists(os.path.join(C.model_dir, 'TRAINING.MARK')):
+        time.sleep(2)
+    else:
+        [p.terminate() for p in process]
 
 
 if __name__ == '__main__':
